@@ -1,172 +1,140 @@
-# RecFlow 实验结果
+# 实验结果 / Experimental Results
 
-## 数据与训练协议
+[项目首页 / Home](../README.md) · [方法说明 / Method](research.md) · [完整汇总 / Full aggregates](../results/recflow)
 
-正式实验于 2026-10-22 完成，配置为 `configs/paper.yaml`，版本为 3。
-监督目标为 RecFlow 发布的 `long_view`。
-原始来源包含 37 个曝光日文件，共 38,245,315 条曝光、7,440,759 个请求。
-用户数量为 39,011，视频数量为 8,773,147。
+## 实验设置 / Setup
 
-| 集合 | Asia/Shanghai 时间区间，左闭右开 | 目标数量 | 正例数量 |
+实验于 2026-10-22 完成，使用 [configs/paper.yaml](../configs/paper.yaml)，配置版本为 3。
+RecFlow `realshow` 包含 37 个日文件，共 38,245,315 条曝光、7,440,759 个请求和 39,011 个用户。
+监督目标为发布的业务 `long_view`。
+
+The experiment completed on 2026-10-22 using [configs/paper.yaml](../configs/paper.yaml), schema version 3.
+The 37 daily RecFlow `realshow` files contain 38,245,315 exposures, 7,440,759 requests, and 39,011 users.
+The target is the released business label `long_view`.
+
+| 集合 / Split | 时间区间 / Time interval | 样本 / Examples | 正例 / Positives |
 | --- | --- | ---: | ---: |
-| 训练 | 2024-01-13 至 2024-02-08 | 3,000,000 | 715,000 |
-| 验证 | 2024-02-08 至 2024-02-12 | 100,000 | 21,940 |
-| 测试 | 2024-02-12 至 2024-02-19 | 200,000 | 45,319 |
+| 训练 / Train | 2024-01-13 ～ 2024-02-08 | 3,000,000 | 715,000 |
+| 验证 / Validation | 2024-02-08 ～ 2024-02-12 | 100,000 | 21,940 |
+| 测试 / Test | 2024-02-12 ～ 2024-02-19 | 200,000 | 45,319 |
 
-原 1,000,000 条训练目标完整包含于本轮训练集合。
-新增成员使用 `PCG64([42,3000000])` 抽样，验证和测试成员完整复用。
-原成员可以按 `configs/local.yaml` 的固定规则重建，已与保存索引逐项核验。
+时间区间为 Asia/Shanghai 的左闭右开区间。训练集合包含原有 1,000,000 条成员，验证与测试成员复用原集合。
 
-| 设置 | 取值 |
+Intervals are left-closed and right-open in Asia/Shanghai. Training includes the original 1,000,000 examples; validation and test membership are retained from the earlier experiment.
+
+| 设置 / Setting | 取值 / Value |
 | --- | --- |
-| 模型 | Wukong、HSTU、Shallow-hybrid、WHALE、WHALE MeanPool |
-| 种子、训练遍历次数 | 42、1 |
-| Embedding、层数、历史行为数 | 64、2、128 |
-| Batch Size、参数更新次数 | 256、11,719；最后一批 192 条 |
-| 样本顺序 | 日期升序，日内按 `PCG64([42,day_index])` 打乱 |
-| 优化器 | AdamW，学习率 0.001，weight decay 为 0.00001 |
-| 损失、梯度限制 | BCEWithLogitsLoss、梯度范数上限 1.0 |
-| 训练 ID 遮盖 | 候选的用户、设备、视频和作者，有效历史的视频和作者；概率 0.05 |
-| 评价输入 | 自然编码，保留自然 UNK |
-| 评价权重 | 单轮结束权重；记录中的 `best_epoch=0` |
-| 设备与精度 | RTX 5090 32 GB、FP32 |
-| 软件 | Python 3.13.5、PyTorch 2.13.0+cu130、CUDA Runtime 13.0 |
+| 种子、训练轮数 / Seed, epochs | 42 / 1 |
+| Embedding 维度、层数、历史上限 / Dimension, layers, history limit | 64 / 2 / 128 |
+| Batch Size、更新次数 / Batch size, updates | 256 / 11,719 |
+| 样本顺序 / Sample order | 日期升序、日内打乱 / Chronological days, shuffled within each day |
+| 优化器 / Optimizer | AdamW; learning rate 0.001; weight decay 0.00001 |
+| 损失与梯度限制 / Loss and gradient clipping | BCEWithLogitsLoss; maximum gradient norm 1.0 |
+| 训练 ID 遮盖概率 / Training ID masking probability | 0.05 |
+| 评价权重 / Evaluation checkpoint | 单轮结束权重 / Final checkpoint after one epoch |
+| 硬件与精度 / Hardware and precision | RTX 5090 32 GB / FP32 |
+| 软件 / Software | Python 3.13.5; PyTorch 2.13.0+cu130; CUDA Runtime 13.0 |
 
-训练遮盖使用 `PCG64([42,epoch,batch_index,97])`，五模型接收相同遮盖输入。
-PAD、自然 UNK、时间、标签和反馈保持原值。
-历史规则、时间假设和模型公式见 [research.md](research.md)。
+ID 遮盖作用于候选的用户、设备、视频和作者，以及有效历史的视频和作者。
+评价使用自然编码，保留未见 ID 对应的 UNK（未知类别）编码。
 
-## 验证与测试结果
+ID masking covers candidate user, device, video, and author IDs, plus valid historical video and author IDs.
+Evaluation uses natural encodings, mapping unseen IDs to UNK (unknown category).
 
-| 模型 | 验证 LogLoss | 测试 AUC | 测试 LogLoss | 测试 NE |
+## 整体结果 / Overall Results
+
+| 模型 / Model | Validation LogLoss | Test AUC ↑ | Test LogLoss ↓ | Test NE ↓ |
 | --- | ---: | ---: | ---: | ---: |
 | Wukong | 0.473570 | 0.727525 | 0.477824 | 0.892913 |
 | HSTU | 0.455769 | 0.756088 | 0.462144 | 0.863612 |
 | Shallow-hybrid | 0.457364 | 0.754102 | 0.463354 | 0.865872 |
-| WHALE | 0.453723 | 0.757566 | 0.459887 | 0.859394 |
+| **WHALE** | **0.453723** | **0.757566** | **0.459887** | **0.859394** |
 | WHALE MeanPool | 0.456541 | 0.754784 | 0.462278 | 0.863863 |
 
-WHALE 的整体测试 AUC 最高，LogLoss 和 NE 最低，验证 LogLoss 同样最低。
-测试正例比例为 22.6595%，五模型使用相同测试成员。
-机器文件保存完整精度，本报告显示六位小数。
+五模型使用相同的 200,000 条测试成员，测试正例比例为 22.6595%。
+表格保留六位小数，[comparison.csv](../results/recflow/comparison.csv) 保存完整精度。
 
-NE（归一化交叉熵）定义为：
+All models use the same 200,000 test examples, with a positive rate of 22.6595%.
+Tables show six decimal places; [comparison.csv](../results/recflow/comparison.csv) retains full precision.
+
+NE（归一化交叉熵）以当前集合的正例比例 `p` 计算。同一集合中，NE 与 LogLoss 的排序一致。
+
+Normalized entropy (NE) uses the positive rate `p` of the evaluated set. NE and LogLoss have identical rankings on the same set.
 
 $$
 NE=\frac{LogLoss}{-p\log p-(1-p)\log(1-p)}.
 $$
 
-`p` 为当前评价集合的正例比例。
-同一测试集合的 LogLoss 和 NE 排名一致，相对降低比例也一致。
-组内 NE 使用组内正例比例，组内 AUC 与 NE 均不能直接平均为整体值。
+## 融合比较 / Fusion Comparisons
 
-## 融合与消融比较
-
-| WHALE 的比较对象 | AUC 增加值 | LogLoss 降低值 | NE 相对降低 |
+| WHALE 的比较对象 / Reference | AUC 增加 / Increase | LogLoss 降低 / Reduction | NE 相对降低 / Relative reduction |
 | --- | ---: | ---: | ---: |
 | HSTU | 0.001478 | 0.002257 | 0.4884% |
 | Shallow-hybrid | 0.003464 | 0.003467 | 0.7482% |
 | WHALE MeanPool | 0.002783 | 0.002391 | 0.5173% |
 
-相对 Shallow-hybrid 的结果支持当前配置下逐层融合的研究方向。
-相对 MeanPool 的结果支持根据当前输入选择历史信息的作用。
-Shallow-hybrid 的均值摘要属于项目设置，各模块独立贡献尚未分别测量。
+当前结果支持继续研究逐层融合与候选相关历史读取。
+Shallow-hybrid 的均值摘要属于项目适配，差值未能单独确定各模块的贡献。
 
-HSTU-only 使用交替物品、反馈和候选输入，最多 257 个 Token。
-WHALE 的历史分支每条历史共同编码为一个 Token，最多 128 个历史 Token。
-两者比较描述相同行为数量下的完整模型表现。
+These results support further study of layer-wise fusion and candidate-conditioned history readout.
+The mean summary in Shallow-hybrid is a project adaptation; the differences do not isolate each module's contribution.
 
-## 自然 UNK 分组
+## 分组表现 / Subgroup Results
 
-“未见”表示目标编号未进入训练字典，评价时使用 UNK 编码。
-视频划分和作者划分分别覆盖全部测试成员，两种划分存在成员交叉。
+“未见”表示编号未进入训练字典，评价时使用 UNK。视频与作者分组分别覆盖全部测试成员。
 
-| 分组 | 数量 | HSTU AUC | WHALE AUC | HSTU LogLoss | WHALE LogLoss |
+“Unseen” means an ID is absent from the training vocabulary and uses UNK during evaluation. Video and author partitions each cover the full test set.
+
+| 分组 / Group | 数量 / Count | HSTU AUC | WHALE AUC | HSTU LogLoss | WHALE LogLoss |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 视频已见 | 66,894 | 0.759751 | 0.760806 | 0.484103 | 0.482840 |
-| 视频未见 | 133,106 | 0.751480 | 0.752955 | 0.451108 | 0.448352 |
-| 作者已见 | 170,101 | 0.753606 | 0.754814 | 0.474247 | 0.472500 |
-| 作者未见 | 29,899 | 0.750744 | 0.752194 | 0.393289 | 0.388127 |
+| 视频已见 / Seen video | 66,894 | 0.759751 | 0.760806 | 0.484103 | 0.482840 |
+| 视频未见 / Unseen video | 133,106 | 0.751480 | 0.752955 | 0.451108 | 0.448352 |
+| 作者已见 / Seen author | 170,101 | 0.753606 | 0.754814 | 0.474247 | 0.472500 |
+| 作者未见 / Unseen author | 29,899 | 0.750744 | 0.752194 | 0.393289 | 0.388127 |
 
-四组中，WHALE 的 AUC 和 LogLoss 均优于 HSTU、Shallow-hybrid 和 MeanPool。
-未见视频占测试目标的 66.5530%，贡献约 81.28% 的 WHALE 相对 HSTU 整体 LogLoss 改善。
-该比例按“组占比 × 组内损失降低值”计算，表示指标的加权关系。
-训练遮盖的独立作用尚未通过消融确认。
+未见视频占测试目标的 66.5530%，WHALE 在上述四组均优于 HSTU。
+时长超过 180 秒的分组中，HSTU 的 AUC 与 LogLoss 更优，WHALE 的优势未覆盖全部分组。
+完整记录见 [ID 分组](../results/recflow/id-groups.csv)和[时长分组](../results/recflow/duration-groups.csv)。
 
-## 视频时长分组
+Unseen videos account for 66.5530% of test examples. WHALE outperforms HSTU in all four groups above.
+For videos longer than 180 seconds, HSTU has better AUC and LogLoss; WHALE's advantage does not hold in every subgroup.
+Full records are in the [ID groups](../results/recflow/id-groups.csv) and [duration groups](../results/recflow/duration-groups.csv).
 
-区间单位为秒，左开右闭。LogLoss 差值为 `WHALE-HSTU`。
+## 计算成本 / Compute
 
-| 时长区间 | 数量 | HSTU AUC | WHALE AUC | LogLoss 差值 |
-| --- | ---: | ---: | ---: | ---: |
-| `(0,5]` | 1,138 | 0.724198 | 0.725881 | -0.006064 |
-| `(5,10]` | 27,637 | 0.736829 | 0.738322 | -0.003182 |
-| `(10,18]` | 40,707 | 0.733481 | 0.733625 | -0.001488 |
-| `(18,30]` | 22,796 | 0.751365 | 0.751313 | -0.003090 |
-| `(30,60]` | 32,589 | 0.756973 | 0.759859 | -0.002521 |
-| `(60,180]` | 30,531 | 0.718840 | 0.720425 | -0.001697 |
-| `(180,+∞)` | 24,059 | 0.677817 | 0.677334 | +0.001544 |
+| 模型 / Model | 训练时间 / Training time | 前向矩阵 MFLOPs／目标 / Forward matrix MFLOPs per example |
+| --- | --- | ---: |
+| Wukong | 00:28:14 | 0.401536 |
+| HSTU | 01:40:06 | 74.049280 |
+| Shallow-hybrid | 00:37:04 | 36.097792 |
+| WHALE | 00:43:37 | 40.781259 |
+| WHALE MeanPool | 00:37:05 | 39.231616 |
 
-WHALE 在七个正时长区间中的五个 AUC 更高、六个 LogLoss 更低。
-超过 180 秒的区间中，HSTU 的两项指标均更优。
-时长缺失或非正的 20,543 条目标独立保留。
-完整分组见 [duration-groups.csv](../results/recflow/duration-groups.csv)。
+完整训练阶段包含验证与最终测试，共用时 04:16:24，峰值显存约 10.43 GiB。
+各模型约有 5.54 亿个参数，其中 Embedding 参数为 553,893,376 个。
 
-## 计算成本
+The full training stage, including validation and final testing, took 04:16:24, with peak GPU memory of approximately 10.43 GiB.
+Each model defines about 554 million parameters, including 553,893,376 embedding parameters.
 
-| 模型 | 训练用时 | 独立运行用时 | 前向矩阵 FLOPs／目标（百万） |
-| --- | --- | --- | ---: |
-| Wukong | 00:28:14 | 00:30:03 | 0.401536 |
-| HSTU | 01:40:06 | 01:42:07 | 74.049280 |
-| Shallow-hybrid | 00:37:04 | 00:39:31 | 36.097792 |
-| WHALE | 00:43:37 | 00:45:35 | 40.781259 |
-| WHALE MeanPool | 00:37:05 | 00:39:00 | 39.231616 |
+FLOPs 来自检查批次的矩阵运算，每次乘加计为两次运算。
+统计范围不含查表、归一化、逐元素操作、反向和优化器。
+HSTU 最多使用 257 个 Token，其他历史分支最多使用 128 个；当前耗时不能单独证明结构效率优势。
 
-独立运行用时包含初始化、训练、验证、最终测试和文件保存。
-整个 `train` 阶段用时 04:16:24。
-五模型各定义约 5.54 亿个参数，其中 Embedding 参数为 553,893,376 个。
-峰值显存范围为 10.4218～10.4255 GiB。
+FLOPs count matrix operations in the check batch, with two operations per multiply-add.
+They exclude lookups, normalization, elementwise operations, backward computation, and optimizer updates.
+HSTU uses up to 257 tokens versus 128 in the other history branches; these timings alone do not establish an architectural efficiency advantage.
 
-WHALE 相对 HSTU 的训练用时减少约 56.43%，前向矩阵 FLOPs 减少约 44.93%。
-相对 Shallow-hybrid 和 MeanPool，WHALE 的训练用时分别增加约 17.67% 和 17.64%。
-FLOPs 只统计实际检查批次中的矩阵乘加，每次乘加计为 2 次运算。
-Embedding 查表、归一化、逐元素操作、反向和优化器均未包含在该统计中。
-这些数值限定于当前实现和设备。
+## 证据与限制 / Evidence and Limitations
 
-## 与原基线的比较
+整体指标与全部分组均复用同次最终测试预测，并完成指标复算和成员核对。
+早期结果见 [baseline-comparison.csv](../results/recflow/baseline-comparison.csv)。
+训练规模、遮盖、顺序和输入组织共同变化，新旧差值只评价完整配置变化。
 
-原配置为 `configs/local.yaml`，训练目标为 1,000,000 条，最多三个 Epoch。
-Wukong 原最佳权重来自第二轮，其余四模型来自第一轮。
+Overall and subgroup metrics reuse the same final test predictions, with metrics recomputed and membership checked.
+Earlier results are available in [baseline-comparison.csv](../results/recflow/baseline-comparison.csv).
+Training size, masking, order, and input organization changed together; historical differences describe the full configuration change.
 
-| 模型 | 原测试 AUC | 本轮测试 AUC | AUC 增加值 |
-| --- | ---: | ---: | ---: |
-| Wukong | 0.712536 | 0.727525 | 0.014989 |
-| HSTU | 0.740730 | 0.756088 | 0.015358 |
-| Shallow-hybrid | 0.736767 | 0.754102 | 0.017335 |
-| WHALE | 0.739573 | 0.757566 | 0.017993 |
-| WHALE MeanPool | 0.737061 | 0.754784 | 0.017723 |
-
-本轮共同改变训练规模、ID 遮盖、样本顺序和遍历次数，HSTU-only 还改变输入组织。
-新旧差值评价完整配置变化，各项改动的独立效果尚未测量。
-
-## 证据与研究限制
-
-公开的 [结果目录](../results/recflow)包含整体表格、全部分组、差值和实验元数据。
-整体指标、45 条时长记录和 20 条自然 UNK 记录，均以同次完整测试预测复算。
-五模型的目标成员、标签、请求关系和自然 UNK 编码已与加工数据核对。
-原始数据、逐条预测、索引、运行日志与保留的 WHALE 权重由项目维护者在本机保存。
-
-- 每模型只运行种子 42，跨种子稳定性与统计显著性尚未确认。
-- 测试成员此前已用于原基线评价，本轮属于既有基准上的探索性研究。
-- 单轮训练不能保证各模型充分收敛，或达到各自的最优验证指标。
-- 历史可用时间依赖明确记录的项目假设。
-- 五模型计算量不同，尚未实现原论文的相近 FLOPs 比较条件。
-- 原始 `long_view` 总正例数与论文表格相差 58 条，来源差异原因尚未确认。
-- 数据来源使用作者发布仓库的可变版本，重复运行还受软件与硬件环境影响。
-
-## 项目经历表述
-
-可引用的项目事实包括：五模型实现、完整真实数据加工、训练恢复、指标复算与分组分析。
-可以报告当前测试 AUC 0.757566，以及相对 HSTU 的 AUC 增加 0.001478。
-模型设计应归属于原论文作者，个人贡献应依据具体参与内容描述。
-本项目的定位为公开数据复现与比较研究。
+- 单个种子，跨种子稳定性尚未测量；单轮训练也不保证各模型达到各自最优效果。<br>Only one seed was run; stability across seeds is unmeasured, and one epoch does not guarantee each model's best performance.
+- 测试成员曾用于早期实验，本研究属于既有基准上的探索性比较。<br>The test examples were used in earlier experiments; this is an exploratory comparison on an existing benchmark.
+- 历史可用时间依赖[项目假设](research.md#历史与时间--history-and-time)，真实反馈完成时刻未知。<br>History availability follows a [project assumption](research.md#历史与时间--history-and-time); actual feedback completion times are unknown.
+- 当前模型规模与计算条件无法验证原论文的工业规模扩展结论。<br>The current model scale and compute conditions do not validate the paper's industrial scaling conclusions.
