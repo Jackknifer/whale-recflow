@@ -1,0 +1,32 @@
+{
+  "created_at": "2026-10-22T13:52:00+08:00",
+  "reference": "whale",
+  "baselines": [
+    "hstu",
+    "shallow_hybrid",
+    "whale_mean_pool"
+  ],
+  "deltas": {
+    "whale_minus_hstu": {
+      "auc": 0.0014780708821102717,
+      "logloss": -0.002257162410484681,
+      "ne": -0.004217976580592531,
+      "ne_relative_improvement": 0.004884110507170252,
+      "logloss_relative_improvement": 0.004884110507170201
+    },
+    "whale_minus_shallow_hybrid": {
+      "auc": 0.003464118008772221,
+      "logloss": -0.003466751709542082,
+      "ne": -0.006478345312527889,
+      "ne_relative_improvement": 0.007481870696171739,
+      "logloss_relative_improvement": 0.007481870696171681
+    },
+    "whale_minus_whale_mean_pool": {
+      "auc": 0.0027827987487155648,
+      "logloss": -0.002391472648165416,
+      "ne": -0.004468963144270699,
+      "ne_relative_improvement": 0.005173231251227999,
+      "logloss_relative_improvement": 0.005173231251227984
+    }
+  }
+}

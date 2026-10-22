@@ -1,0 +1,14 @@
+cff-version: 1.2.0
+message: "使用本项目时，请引用此软件，并同时引用 docs/research.md 中的原模型与数据论文。"
+type: software
+title: "WHALE-RecFlow: Layer-wise Feature and History Fusion"
+version: 0.1.0
+authors:
+  - name: Jackknifer
+license: Apache-2.0
+keywords:
+  - recommendation
+  - WHALE
+  - RecFlow
+  - PyTorch
+  - reproduction

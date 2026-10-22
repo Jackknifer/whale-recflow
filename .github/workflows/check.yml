@@ -1,0 +1,32 @@
+name: 项目检查
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    env:
+      UV_CACHE_DIR: ${{ github.workspace }}/.work/uv-cache
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - run: |
+          mkdir -p .work/runtime .work/uv-cache
+          printf 'TMPDIR=%s/.work/runtime\n' "$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+      - uses: astral-sh/setup-uv@v10.3.2
+        with:
+          version: "0.12.10"
+          python-version: "3.13"
+      - run: uv lock --check
+      - run: uv sync --frozen --no-dev
+      - run: uv build --out-dir .work/dist
+      - run: uv run python scripts/prepare_data.py --help
+      - run: uv run python scripts/run_experiment.py --help
+      - run: uv run python scripts/export_results.py --help
+      - run: uv run python scripts/export_public_results.py --help

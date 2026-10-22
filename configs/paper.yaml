@@ -1,0 +1,142 @@
+schema_version: 3
+project: whale-reproduction
+seed: 42
+experiment:
+  models: [wukong, hstu, shallow_hybrid, whale, whale_mean_pool]
+  runs_per_model: 1
+  parallel_runs: 1
+  output_root: outputs/paper
+  baseline_indices: outputs/runs/whale-s42/target_indices.npz
+runtime:
+  python: "3.13"
+  device: cuda
+  dtype: float32
+  num_workers: 0
+  allow_device_fallback: false
+data:
+  name: RecFlow
+  raw_root: data/raw/RecFlow
+  processed_root: data/processed/recflow-paper
+  label: long_view
+  timezone: Asia/Shanghai
+  files:
+    start_date: "2024-01-13"
+    end_date: "2024-02-18"
+    extension: ".feather"
+    expected_count: 37
+  train_start: "2024-01-13T00:00:00+08:00"
+  validation_start: "2024-02-08T00:00:00+08:00"
+  test_start: "2024-02-12T00:00:00+08:00"
+  end_exclusive: "2024-02-19T00:00:00+08:00"
+  target_samples:
+    train: 3000000
+    validation: 100000
+    test: 200000
+  sampling: extend_baseline_uniform_without_replacement
+  extension_seed: [42, 3000000]
+  max_history_length: 128
+  history_source: realshow
+  history_availability: request_timestamp_plus_playing_time
+  playing_time_unit: ms
+  request_gap_ms: 60000
+  same_request_timestamp: exclude
+  padding_side: right
+  vocabulary_fit: training_inputs_and_their_histories
+  padding_index: 0
+  unknown_index: 1
+  feedback_index_offset: 2
+  categorical_fields:
+    - user_id
+    - device_id
+    - age
+    - gender
+    - province
+    - video_id
+    - author_id
+    - category_level_one
+    - category_level_two
+    - upload_type
+  history_video_fields:
+    - video_id
+    - author_id
+    - category_level_one
+    - category_level_two
+    - upload_type
+  history_feedback_fields:
+    - effective_view
+    - long_view
+  numerical_groups:
+    - [log_video_duration, video_duration_missing]
+    - [hour_sin, hour_cos, weekday_sin, weekday_cos]
+    - [log_video_age_days, video_age_missing]
+model:
+  name: whale
+  embedding_dim: 64
+  layer_norm_eps: 0.000001
+  num_layers: 2
+  input_tokens: 13
+  nonsequence_tokens: 8
+  numerical_hidden_dim: 64
+  sequence_hidden_dim: 128
+  wukong:
+    fm: full_dot_product
+    fmb_tokens: 4
+    lcb_tokens: 4
+    mlp_hidden_dims: [128]
+    activation: silu
+  hstu:
+    num_heads: 4
+    attention_dim_per_head: 16
+    value_dim_per_head: 16
+    attention_normalization: silu_div_max_history_length
+    relative_time_buckets: 128
+    relative_time_log_divisor: 0.301
+    time_alignment: current_event
+    ranking_input: interleaved
+    ranking_time_alignment: next_event
+    input_projection_bias: false
+    output_projection_bias: true
+    norm_affine: false
+    dropout: 0.0
+  fusion:
+    attention: softmax
+    num_heads: 1
+    projection_bias: false
+    swiglu_hidden_dim: 128
+  head:
+    hidden_dims: [128]
+    activation: silu
+    dropout: 0.0
+training:
+  batch_size: 256
+  max_epochs: 1
+  optimizer: adamw
+  learning_rate: 0.001
+  weight_decay: 0.00001
+  loss: bce_with_logits
+  gradient_clip_norm: 1.0
+  selection_metric: validation_logloss
+  selection_mode: min
+  tie_break: earliest_epoch
+  early_stopping_patience: 1
+  early_stopping_min_delta: 0.000001
+  checkpoint_on_epoch_end: true
+  log_every_steps: 100
+  sample_order: daily_shuffle
+  id_mask_probability: 0.05
+  id_mask_fields: [user_id, device_id, video_id, author_id]
+  id_mask_seed_namespace: 97
+evaluation:
+  metrics: [auc, logloss, ne]
+  probability_dtype: float64
+  single_class_policy: error
+  final_test_policy: final_epoch_only
+  duration_group_unit: second
+  duration_groups:
+    - [0, 5]
+    - [5, 10]
+    - [10, 18]
+    - [18, 30]
+    - [30, 60]
+    - [60, 180]
+    - [180, null]

@@ -1,0 +1,20 @@
+WHALE-RecFlow
+Copyright 2026 Jackknifer
+
+本项目采用 Apache License 2.0 发布源码和文档。
+results/ 中的 RecFlow 实验汇总采用 CC BY-SA 4.0，条款见 LICENSES/CC-BY-SA-4.0.txt。
+
+HSTU 的参考实现来自 Meta Platforms, Inc. and affiliates：
+https://github.com/meta-recsys/generative-recommenders
+其原始版权声明为 Copyright (c) Meta Platforms, Inc. and affiliates.
+该参考实现采用 Apache License 2.0。
+本项目的 models/hstu.py 和 models/ranking_input.py 按论文与参考实现重新组织，
+包含针对 RecFlow 的输入、时间、有效位置和因果条件处理。
+
+RecFlow 数据集由 Qi Liu 等作者发布：
+https://github.com/RecFlow-ICLR/RecFlow
+原项目采用 CC BY-SA 4.0。
+公开的 results/ 为本项目计算的分组与整体统计，保留数据来源署名。
+原始数据、加工记录、成员索引、逐条预测和训练权重由使用者在本地管理。
+
+WHALE、Wukong、HSTU 和 RecFlow 的论文作者及引用见 docs/research.md。
