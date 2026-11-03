@@ -9,6 +9,7 @@ import numpy as np
 from ..config import Config
 from ..utils import current_timestamp, write_json
 from .history import HistoryReader, build_history_index
+from .official_history import read_official_histories
 from .preprocessing import fit_numerical_parameters, raw_numerical_values
 from .raw import (
     ExposureTable,
@@ -49,11 +50,11 @@ def history_statistics(
     target_positions: np.ndarray,
     max_length: int,
     unknown_masks: dict[str, np.ndarray] | None = None,
+    feedback_fields: tuple[str, ...] = ("effective_view", "long_view"),
 ) -> dict[str, Any]:
     lengths = history_counts[target_positions].astype(np.int64)
     weights = np.bincount(target_positions, minlength=history_counts.size)
-    effective_positive = 0
-    long_positive = 0
+    feedback_positive = {field: 0 for field in feedback_fields}
     total_positions = 0
     unknown_counts = {field: 0 for field in (unknown_masks or {})}
     for start in range(0, history_rows.shape[0], HISTORY_CHUNK):
@@ -62,12 +63,10 @@ def history_statistics(
         valid = chunk >= 0
         safe = np.maximum(chunk, 0)
         multiplicity = weights[start:end]
-        effective_positive += int(np.dot(
-            (exposure.effective_view[safe] * valid).sum(axis=1), multiplicity
-        ))
-        long_positive += int(np.dot(
-            (exposure.long_view[safe] * valid).sum(axis=1), multiplicity
-        ))
+        for field in feedback_fields:
+            feedback_positive[field] += int(np.dot(
+                (exposure.feedback(field)[safe] * valid).sum(axis=1), multiplicity
+            ))
         total_positions += int(np.dot(valid.sum(axis=1), multiplicity))
         for field, mask in (unknown_masks or {}).items():
             unknown_counts[field] += int(np.dot((mask[safe] & valid).sum(axis=1), multiplicity))
@@ -79,9 +78,9 @@ def history_statistics(
         "full_history_count": int((lengths >= max_length).sum()),
         "c32": float((lengths >= 32).mean()),
         "c64": float((lengths >= 64).mean()),
-        "c128": float((lengths >= max_length).mean()),
-        "history_effective_view_positive": effective_positive,
-        "history_long_view_positive": long_positive,
+        "c128": float((lengths >= 128).mean()),
+        **({"c50": float((lengths >= 50).mean())} if max_length == 50 else {}),
+        **{f"history_{field}_positive": value for field, value in feedback_positive.items()},
         "history_total_positions": total_positions,
         **({"history_unknown_ratio": {
             field: count / total_positions if total_positions else None
@@ -111,8 +110,10 @@ def prepare(config: Config, *, baseline_config: Config | None = None) -> dict[st
     candidates = candidate_rows(exposure, config)
     target_rows = sample_targets(exposure, config, candidates, baseline_config=baseline_config)
 
-    history_index = build_history_index(exposure, request_index)
-    reader = HistoryReader(history_index, config.data.max_history_length)
+    reader = None
+    if not config.data.uses_official_history:
+        history_index = build_history_index(exposure, request_index)
+        reader = HistoryReader(history_index, config.data.max_history_length)
     history_rows: dict[str, np.ndarray] = {}
     history_counts: dict[str, np.ndarray] = {}
     history_requests: dict[str, np.ndarray] = {}
@@ -123,6 +124,10 @@ def prepare(config: Config, *, baseline_config: Config | None = None) -> dict[st
             exposure.request_id[rows], return_index=True, return_inverse=True
         )
         representative = rows[first]
+        history_requests[split] = requests.astype(np.int64)
+        history_target_positions[split] = inverse.astype(np.int32)
+        if reader is None:
+            continue
         collected = np.full(
             (requests.size, config.data.max_history_length), -1, dtype=np.int32
         )
@@ -139,16 +144,20 @@ def prepare(config: Config, *, baseline_config: Config | None = None) -> dict[st
             counts[start:end] = chunk_counts
         history_rows[split] = collected
         history_counts[split] = counts
-        history_requests[split] = requests.astype(np.int64)
-        history_target_positions[split] = inverse.astype(np.int32)
-    del reader, history_index
+    official_audit = None
+    if config.data.uses_official_history:
+        history_rows, history_counts, official_audit = read_official_histories(
+            config, exposure, request_index, history_requests
+        )
+    else:
+        del reader, history_index
 
     train_rows = target_rows["train"]
     train_history = history_rows["train"]
     vocabulary = fit_vocabulary(config, exposure, train_rows, train_history)
     numerical = fit_numerical_parameters(numerical_inputs(exposure, train_rows))
     unknown_masks = None
-    if config.schema_version == 3:
+    if config.schema_version >= 3:
         unknown_masks = {
             field: vocabulary.encode(field, exposure.video_attribute(field)) == vocabulary.unknown_index
             for field in config.data.history_video_fields
@@ -179,6 +188,7 @@ def prepare(config: Config, *, baseline_config: Config | None = None) -> dict[st
                 history_target_positions[split],
                 config.data.max_history_length,
                 unknown_masks,
+                config.data.history_feedback_fields,
             ),
         }
 
@@ -234,8 +244,23 @@ def prepare(config: Config, *, baseline_config: Config | None = None) -> dict[st
         "prepare_seconds": float(time.perf_counter() - started),
         "host_memory": _host_memory(),
     }
-    if config.schema_version == 3:
-        metadata["processed_format_version"] = 3
+    if config.data.uses_official_history:
+        metadata["history_conditions"] = {
+            "source": config.data.history_source,
+            "same_user": True,
+            "different_request": True,
+            "request_time_strictly_before": True,
+            "availability": config.data.history_availability,
+            "feedback_completion_time_verified": False,
+            "feedback_fields": list(config.data.history_feedback_fields),
+            "effective_view_required": 1,
+            "order": "(request_timestamp, request_id, event_id)",
+            "padding_side": config.data.padding_side,
+            "policy": "author_supplied_members_with_strict_request_time_filter",
+        }
+        metadata["official_history_audit"] = official_audit
+    if config.schema_version >= 3:
+        metadata["processed_format_version"] = config.schema_version
     if baseline_config is not None:
         metadata["reconstructed_baseline_config"] = baseline_config.snapshot()
     root = save_processed(

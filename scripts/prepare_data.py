@@ -12,7 +12,7 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--config", required=True, type=Path, help="配置文件路径")
     parser.add_argument(
         "--baseline-config", type=Path,
-        help="显式从版本 2 配置重建基线成员，用于首次下载仓库后的版本 3 加工",
+        help="显式从版本 2 配置重建基线成员，用于版本 3、4 的目标抽样",
     )
     return parser.parse_args(argv)
 
@@ -32,6 +32,8 @@ def main(argv: list[str]) -> int:
             "event_count": metadata["event_count"],
             "request_count": metadata["request_count"],
             "source_file_count": metadata["source_file_count"],
+            "schema_version": config.schema_version,
+            "history_conditions": metadata["history_conditions"],
             "processed_bytes": metadata["processed_bytes"],
             "splits": {
                 split: {

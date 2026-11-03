@@ -38,6 +38,8 @@ class HistoryIndex:
 def build_history_index(
     exposure: ExposureTable, request_index: RequestIndex
 ) -> HistoryIndex:
+    if request_index.available_ms is None:
+        raise ValueError("曝光历史索引需要请求可用时间")
     slot = request_index.positions(exposure.request_id)
     if np.any(slot < 0):
         raise ValueError("曝光记录的 request_id 未出现在请求索引中")

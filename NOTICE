@@ -14,6 +14,8 @@ https://github.com/meta-recsys/generative-recommenders
 RecFlow 数据集由 Qi Liu 等作者发布：
 https://github.com/RecFlow-ICLR/RecFlow
 原项目采用 CC BY-SA 4.0。
+作者 seq_effective_50_dict 的字段顺序参考原项目 rank/dataset.py。
+data/official_history.py 连接原始曝光恢复时间，并执行本项目的历史过滤规则。
 公开的 results/ 为本项目计算的分组与整体统计，保留数据来源署名。
 原始数据、加工记录、成员索引、逐条预测和训练权重由使用者在本地管理。
 

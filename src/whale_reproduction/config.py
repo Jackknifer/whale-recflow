@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-SUPPORTED_SCHEMA_VERSIONS = (2, 3)
+SUPPORTED_SCHEMA_VERSIONS = (2, 3, 4)
 
 
 def _field(mapping: dict[str, Any], key: str) -> Any:
@@ -61,8 +61,8 @@ class DataConfig:
     max_history_length: int
     history_source: str
     history_availability: str
-    playing_time_unit: str
-    request_gap_ms: int
+    playing_time_unit: str | None
+    request_gap_ms: int | None
     same_request_timestamp: str
     padding_side: str
     vocabulary_fit: str
@@ -74,6 +74,11 @@ class DataConfig:
     history_feedback_fields: tuple[str, ...]
     numerical_groups: tuple[tuple[str, ...], ...]
     extension_seed: tuple[int, ...] = ()
+    history_archive: Path | None = None
+
+    @property
+    def uses_official_history(self) -> bool:
+        return self.history_source == "seq_effective_50_dict"
 
     def time_bounds_ms(self) -> dict[str, tuple[int, int]]:
         bounds = {
@@ -264,7 +269,7 @@ class Config:
         del data["raw_root"]
         del data["processed_root"]
         result = {"schema_version": self.schema_version, "seed": self.seed, "data": data}
-        if self.schema_version == 3:
+        if self.schema_version >= 3:
             result["baseline_indices"] = str(self.experiment.baseline_indices)
         return result
 
@@ -387,7 +392,7 @@ class Config:
                 "duration_group_unit": self.evaluation.duration_group_unit,
             },
         }
-        if self.schema_version == 3:
+        if self.schema_version >= 3:
             result["experiment"]["baseline_indices"] = str(self.experiment.baseline_indices)
             result["data"]["extension_seed"] = list(self.data.extension_seed)
             result["model"]["hstu"].update({
@@ -400,6 +405,10 @@ class Config:
                 "id_mask_fields": list(self.training.id_mask_fields),
                 "id_mask_seed_namespace": self.training.id_mask_seed_namespace,
             })
+        if self.data.uses_official_history:
+            del result["data"]["playing_time_unit"]
+            del result["data"]["request_gap_ms"]
+            result["data"]["history_archive"] = str(self.data.history_archive)
         return result
 
 
@@ -416,6 +425,8 @@ def _load_data_config(section: dict[str, Any], version: int) -> DataConfig:
     files = _field(section, "files")
     if not isinstance(files, dict):
         raise TypeError("配置字段 files 需要映射")
+    if version == 4 and any(key in section for key in ("playing_time_unit", "request_gap_ms")):
+        raise ValueError("作者历史配置不接受观看时长或额外等待参数")
     return DataConfig(
         name=_expect(section, "name", "RecFlow"),
         raw_root=Path(_field(section, "raw_root")),
@@ -433,12 +444,12 @@ def _load_data_config(section: dict[str, Any], version: int) -> DataConfig:
         target_samples={split: int(value) for split, value in target_samples.items()},
         sampling=_expect(section, "sampling", "uniform_without_replacement" if version == 2 else "extend_baseline_uniform_without_replacement"),
         max_history_length=int(_field(section, "max_history_length")),
-        history_source=_expect(section, "history_source", "realshow"),
+        history_source=_expect(section, "history_source", "seq_effective_50_dict" if version == 4 else "realshow"),
         history_availability=_expect(
-            section, "history_availability", "request_timestamp_plus_playing_time"
+            section, "history_availability", "official_history_strict_request_time" if version == 4 else "request_timestamp_plus_playing_time"
         ),
-        playing_time_unit=_expect(section, "playing_time_unit", "ms"),
-        request_gap_ms=int(_field(section, "request_gap_ms")),
+        playing_time_unit=None if version == 4 else _expect(section, "playing_time_unit", "ms"),
+        request_gap_ms=None if version == 4 else int(_field(section, "request_gap_ms")),
         same_request_timestamp=_expect(
             section, "same_request_timestamp", "exclude"
         ),
@@ -453,7 +464,8 @@ def _load_data_config(section: dict[str, Any], version: int) -> DataConfig:
         history_video_fields=_as_tuple(section, "history_video_fields"),
         history_feedback_fields=_as_tuple(section, "history_feedback_fields"),
         numerical_groups=tuple(tuple(group) for group in groups),
-        extension_seed=tuple(int(v) for v in _field(section, "extension_seed")) if version == 3 else (),
+        extension_seed=tuple(int(v) for v in _field(section, "extension_seed")) if version >= 3 else (),
+        history_archive=Path(_field(section, "history_archive")) if version == 4 else None,
     )
 
 
@@ -492,8 +504,8 @@ def _load_model_config(section: dict[str, Any], version: int) -> ModelConfig:
             output_projection_bias=bool(_field(hstu, "output_projection_bias")),
             norm_affine=bool(_field(hstu, "norm_affine")),
             dropout=float(_field(hstu, "dropout")),
-            ranking_input=_expect(hstu, "ranking_input", "interleaved") if version == 3 else "pooled",
-            ranking_time_alignment=_expect(hstu, "ranking_time_alignment", "next_event") if version == 3 else "next_event",
+            ranking_input=_expect(hstu, "ranking_input", "interleaved") if version >= 3 else "pooled",
+            ranking_time_alignment=_expect(hstu, "ranking_time_alignment", "next_event") if version >= 3 else "next_event",
         ),
         fusion=FusionConfig(
             attention=_expect(fusion, "attention", "softmax"),
@@ -525,10 +537,10 @@ def _load_training_config(section: dict[str, Any], version: int) -> TrainingConf
         early_stopping_min_delta=float(_field(section, "early_stopping_min_delta")),
         checkpoint_on_epoch_end=bool(_field(section, "checkpoint_on_epoch_end")),
         log_every_steps=int(_field(section, "log_every_steps")),
-        sample_order=_expect(section, "sample_order", "daily_shuffle") if version == 3 else "global_shuffle",
-        id_mask_probability=float(_expect(section, "id_mask_probability", 0.05)) if version == 3 else 0.0,
-        id_mask_fields=_as_tuple(section, "id_mask_fields") if version == 3 else (),
-        id_mask_seed_namespace=int(_expect(section, "id_mask_seed_namespace", 97)) if version == 3 else 97,
+        sample_order=_expect(section, "sample_order", "daily_shuffle") if version >= 3 else "global_shuffle",
+        id_mask_probability=float(_expect(section, "id_mask_probability", 0.05)) if version >= 3 else 0.0,
+        id_mask_fields=_as_tuple(section, "id_mask_fields") if version >= 3 else (),
+        id_mask_seed_namespace=int(_expect(section, "id_mask_seed_namespace", 97)) if version >= 3 else 97,
     )
 
 
@@ -590,7 +602,7 @@ def _load_experiment_config(section: dict[str, Any], version: int) -> Experiment
         runs_per_model=1,
         parallel_runs=1,
         output_root=Path(_field(section, "output_root")),
-        baseline_indices=Path(_field(section, "baseline_indices")) if version == 3 else None,
+        baseline_indices=Path(_field(section, "baseline_indices")) if version >= 3 else None,
     )
 
 
@@ -645,22 +657,24 @@ def load_config(path: str | Path) -> Config:
         raise ValueError(f"目标样本数量与正式设置不一致：{config.data.target_samples}")
     if config.model.embedding_dim != 64 or config.model.num_layers != 2:
         raise ValueError("正式实验固定 Embedding 为 64、层数为 2")
-    if config.data.max_history_length != 128:
-        raise ValueError("正式实验固定历史长度为 128")
+    if config.data.max_history_length != (50 if version == 4 else 128):
+        raise ValueError("历史长度与当前配置版本不一致")
     if config.training.batch_size != 256 or config.training.max_epochs != (3 if version == 2 else 1):
         raise ValueError("Batch Size 或训练轮数与当前配置版本不一致")
-    if version == 3:
+    if version >= 3:
         if config.data.extension_seed != (42, 3000000):
             raise ValueError("扩充抽样种子需要为 [42,3000000]")
         if config.training.id_mask_fields != ("user_id", "device_id", "video_id", "author_id"):
             raise ValueError("训练 ID 遮盖字段或顺序与方案不一致")
-        if config.experiment.output_root != Path("outputs/paper") or config.data.processed_root != Path("data/processed/recflow-paper"):
-            raise ValueError("版本 3 需要独立的正式结果与加工目录")
+        output_root = Path("outputs/official" if version == 4 else "outputs/paper")
+        processed_root = Path("data/processed/recflow-official" if version == 4 else "data/processed/recflow-paper")
+        if config.experiment.output_root != output_root or config.data.processed_root != processed_root:
+            raise ValueError(f"版本 {version} 需要独立的正式结果与加工目录")
     if config.model.input_tokens != 13 or config.model.nonsequence_tokens != 8:
         raise ValueError("正式实验固定初始 Token 为 13、Wukong 输出 Token 为 8")
-    if config.data.playing_time_unit != "ms":
+    if version < 4 and config.data.playing_time_unit != "ms":
         raise ValueError("历史可用时间按毫秒解释 playing_time")
-    if config.data.request_gap_ms != 60000:
+    if version < 4 and config.data.request_gap_ms != 60000:
         raise ValueError("请求可用时间固定增加 60000 毫秒")
     expected_fields = (
         "user_id", "device_id", "age", "gender", "province", "video_id",
@@ -670,7 +684,8 @@ def load_config(path: str | Path) -> Config:
         raise ValueError("类别字段及其顺序与 RecFlow 输入设计不一致")
     if config.data.history_video_fields != expected_fields[5:]:
         raise ValueError("历史视频属性及其顺序与 RecFlow 输入设计不一致")
-    if config.data.history_feedback_fields != ("effective_view", "long_view"):
+    expected_feedback = ("effective_view",) if version == 4 else ("effective_view", "long_view")
+    if config.data.history_feedback_fields != expected_feedback:
         raise ValueError("历史反馈字段及其顺序与 RecFlow 输入设计不一致")
     if config.data.numerical_groups != (
         ("log_video_duration", "video_duration_missing"),

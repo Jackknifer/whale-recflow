@@ -104,7 +104,7 @@ def collect_records(config: Config) -> list[dict[str, Any]]:
                 "peak_memory_gib": float(record["peak_memory_gib"]),
                 "test_count": int(record["final_test_count"]),
                 "duration_groups": record["duration_groups"],
-                **({"id_groups": record["id_groups"], "compute": record["compute"]} if config.schema_version == 3 else {}),
+                **({"id_groups": record["id_groups"], "compute": record["compute"]} if config.schema_version >= 3 else {}),
             }
         )
     return records
@@ -149,7 +149,7 @@ def build_duration_frame(records: list[dict[str, Any]]) -> pd.DataFrame:
 def build_comparison(config: Config) -> tuple[pd.DataFrame, dict[str, Any]]:
     records = collect_records(config)
     frame = pd.DataFrame(records)[list(COMPARISON_COLUMNS)]
-    if config.schema_version == 3:
+    if config.schema_version >= 3:
         frame["matrix_forward_flops_per_sample"] = [record["compute"]["matrix_forward_flops_per_sample"] for record in records]
         frame["history_behaviors"] = config.data.max_history_length
         frame["max_sequence_tokens"] = [record["compute"]["max_sequence_tokens"] for record in records]
@@ -170,7 +170,7 @@ def build_comparison(config: Config) -> tuple[pd.DataFrame, dict[str, Any]]:
         }
         for record in records
     }
-    baselines = ("hstu", SHALLOW_BASELINE, MEAN_POOL_ABLATION) if config.schema_version == 3 else (SHALLOW_BASELINE, MEAN_POOL_ABLATION)
+    baselines = ("hstu", SHALLOW_BASELINE, MEAN_POOL_ABLATION) if config.schema_version >= 3 else (SHALLOW_BASELINE, MEAN_POOL_ABLATION)
     deltas = build_deltas(metrics_by_model, PRIMARY_MODEL, baselines)
     write_json(
         directory / DELTAS_FILE,
@@ -190,11 +190,14 @@ def build_comparison(config: Config) -> tuple[pd.DataFrame, dict[str, Any]]:
         "deltas": deltas,
         "rows": records,
     }
-    if config.schema_version == 3:
+    if config.schema_version >= 3:
         id_rows = [{"model": record["model"], **group, "notes": "; ".join(group["notes"])} for record in records for group in record["id_groups"]]
         pd.DataFrame(id_rows).to_csv(directory / "id-groups.csv", index=False, float_format="%.17g")
         context = read_json(config.run_directory(PRIMARY_MODEL) / "config.json")
         summary["data_statistics"] = context["data_context"]["split_statistics"]
         summary["config"] = config.snapshot()
+        if config.data.uses_official_history:
+            summary["history_protocol"] = context["data_context"]["history_conditions"]
+            summary["official_history"] = context["data_context"]["official_history"]
     write_json(directory / SUMMARY_FILE, summary)
     return frame, summary

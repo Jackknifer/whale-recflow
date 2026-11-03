@@ -106,12 +106,22 @@ class BatchReader:
             "vocabulary": self._vocabulary.rules(),
             "numerical": self._numerical.to_json(),
         }
-        if self._config.schema_version == 3:
+        if self._config.schema_version >= 3:
             result["split_statistics"] = self._data.metadata["splits"]
+        if self._config.data.uses_official_history:
+            result["history_conditions"] = self._data.metadata["history_conditions"]
+            audit = self._data.metadata["official_history_audit"]
+            result["official_history"] = {
+                key: value for key, value in audit.items() if key not in ("seconds", "days")
+            }
+            result["official_history"]["days"] = [
+                {key: value for key, value in day.items() if key != "seconds"}
+                for day in audit["days"]
+            ]
         return result
 
     @property
-    def event_available_ms(self) -> np.ndarray:
+    def event_available_ms(self) -> np.ndarray | None:
         return self._data.event_available_ms
 
     @property
@@ -226,8 +236,8 @@ class BatchReader:
             yield self.mask_training_batch(batch, epoch, batch_index) if training else batch
 
     def daily_order(self, epoch: int) -> np.ndarray:
-        if epoch != 0 and self._config.schema_version == 3:
-            raise ValueError("版本 3 只允许单轮训练")
+        if epoch != 0 and self._config.schema_version >= 3:
+            raise ValueError("当前配置只允许单轮训练")
         rows = self.target_rows("train")
         start_ms = parse_time_ms(self._config.data.train_start, self._config.data.timezone)
         day = (self._exposure.request_timestamp[rows] - start_ms) // 86400000

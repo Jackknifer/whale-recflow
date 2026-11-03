@@ -109,7 +109,7 @@ class RequestIndex:
     request_ids: np.ndarray
     user_id: np.ndarray
     request_timestamp: np.ndarray
-    available_ms: np.ndarray
+    available_ms: np.ndarray | None
     event_counts: np.ndarray
 
     @property
@@ -284,7 +284,7 @@ def read_exposure(config: Config) -> tuple[ExposureTable, list[SourceFile]]:
     )
 
 
-def build_request_index(exposure: ExposureTable, request_gap_ms: int) -> RequestIndex:
+def build_request_index(exposure: ExposureTable, request_gap_ms: int | None) -> RequestIndex:
     order = np.argsort(exposure.request_id, kind="stable")
     sorted_request = exposure.request_id[order]
     starts_mask = np.zeros(sorted_request.size, dtype=bool)
@@ -300,15 +300,17 @@ def build_request_index(exposure: ExposureTable, request_gap_ms: int) -> Request
         raise ValueError("同一 request_id 对应多个用户")
     if np.any(sorted_time != sorted_time[starts][group]):
         raise ValueError("同一 request_id 对应多个请求时间")
-    playing_sum = np.add.reduceat(exposure.playing_time[order].astype(np.int64), starts)
     unique_time = sorted_time[starts]
-    available = unique_time + playing_sum + request_gap_ms
-    if np.any(available < unique_time):
-        raise ValueError("请求可用时间计算出现整数溢出")
+    available = None
+    if request_gap_ms is not None:
+        playing_sum = np.add.reduceat(exposure.playing_time[order].astype(np.int64), starts)
+        available = unique_time + playing_sum + request_gap_ms
+        if np.any(available < unique_time):
+            raise ValueError("请求可用时间计算出现整数溢出")
     return RequestIndex(
         request_ids=unique_request.astype(np.int64),
         user_id=sorted_user[starts].astype(np.int32),
         request_timestamp=unique_time.astype(np.int64),
-        available_ms=available.astype(np.int64),
+        available_ms=available,
         event_counts=counts.astype(np.int32),
     )

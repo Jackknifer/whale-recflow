@@ -39,10 +39,10 @@ def sample_targets(
     *,
     baseline_config: Config | None = None,
 ) -> dict[str, np.ndarray]:
-    if config.schema_version == 3:
+    if config.schema_version >= 3:
         return extend_baseline_targets(exposure, config, candidates, baseline_config)
     if baseline_config is not None:
-        raise ValueError("基线成员重建仅用于版本 3")
+        raise ValueError("基线成员重建需要扩充抽样配置")
     generator = np.random.Generator(np.random.PCG64(config.seed))
     sampled: dict[str, np.ndarray] = {}
     for split in SPLIT_ORDER:

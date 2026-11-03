@@ -26,6 +26,7 @@ jobs:
       - run: uv lock --check
       - run: uv sync --frozen --no-dev
       - run: uv build --out-dir .work/dist
+      - run: uv run python -c "from whale_reproduction.config import load_config; [load_config(path) for path in ('configs/local.yaml', 'configs/paper.yaml', 'configs/official.yaml')]"
       - run: uv run python scripts/prepare_data.py --help
       - run: uv run python scripts/run_experiment.py --help
       - run: uv run python scripts/export_results.py --help

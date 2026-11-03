@@ -63,9 +63,6 @@ def check_data(
     history_user = np.where(valid, exposure.user_id[safe].astype(np.int64), -1)
     history_time = np.where(valid, exposure.request_timestamp[safe], 0)
     history_request = np.where(valid, exposure.request_id[safe].astype(np.int64), -1)
-    history_available = np.where(
-        valid, reader.event_available_ms[safe], 0
-    )
     user_broadcast = np.broadcast_to(target_user[:, None], valid.shape)
     time_broadcast = np.broadcast_to(target_time[:, None], valid.shape)
     request_broadcast = np.broadcast_to(target_request[:, None], valid.shape)
@@ -73,8 +70,22 @@ def check_data(
         raise ValueError("历史检查失败：存在属于其他用户的历史事件")
     if not (history_time[valid] < time_broadcast[valid]).all():
         raise ValueError("历史检查失败：存在请求时间不早于目标请求时间的历史事件")
-    if not (history_available[valid] < time_broadcast[valid]).all():
-        raise ValueError("历史检查失败：存在可用时间不早于目标请求时间的历史事件")
+    if config.data.uses_official_history:
+        if reader.event_available_ms is not None:
+            raise ValueError("作者历史不应包含估计可用时间")
+        if config.data.history_feedback_fields != ("effective_view",):
+            raise ValueError("作者历史反馈字段与当前协议不一致")
+        if np.any(valid & (exposure.effective_view[safe] != 1)):
+            raise ValueError("作者历史存在无效观看事件")
+        audit = reader.data_context["official_history"]
+        if not audit["complete"]:
+            raise ValueError("作者历史来源尚未完成核验")
+    else:
+        if reader.event_available_ms is None:
+            raise ValueError("曝光历史缺少请求可用时间")
+        history_available = np.where(valid, reader.event_available_ms[safe], 0)
+        if not (history_available[valid] < time_broadcast[valid]).all():
+            raise ValueError("历史检查失败：存在可用时间不早于目标请求时间的历史事件")
     if not (history_request[valid] != request_broadcast[valid]).all():
         raise ValueError("历史检查失败：存在与目标同请求的历史事件")
     if counts.max() > reader.max_history_length:
@@ -145,7 +156,9 @@ def check_data(
         "same_user_verified": True,
         "different_request_verified": True,
         "strict_request_time_verified": True,
-        "strict_availability_verified": True,
+        **({"official_history_membership_verified": True, "effective_view_verified": True,
+            "feedback_completion_time_verified": False}
+           if config.data.uses_official_history else {"strict_availability_verified": True}),
     }
 
 
@@ -161,10 +174,10 @@ def check_training_step(
     optimizer = build_optimizer(config, model)
     loss_function = build_loss(config)
     _, batch = _representative_batch(config, reader, "train")
-    if config.schema_version == 3:
+    if config.schema_version >= 3:
         batch = reader.mask_training_batch(batch, 0, 0)
     tensors = batch.as_tensors(device)
-    ranking_report = check_ranking_path(model, tensors) if model_name == "hstu" and config.schema_version == 3 else None
+    ranking_report = check_ranking_path(model, tensors) if model_name == "hstu" and config.schema_version >= 3 else None
     labels = torch.from_numpy(batch.labels).to(device)
     model.train()
     optimizer.zero_grad(set_to_none=True)
@@ -176,7 +189,7 @@ def check_training_step(
         raise ValueError(f"{model_name} 损失不是有限值")
     loss.backward()
     unknown_gradients = {}
-    if config.schema_version == 3:
+    if config.schema_version >= 3:
         for field in config.training.id_mask_fields:
             gradient = model._embedding._categorical[field].weight.grad
             norm = float(gradient[1].norm()) if gradient is not None else 0.0
@@ -302,7 +315,7 @@ def measure_training_speed(
     loss_function = build_loss(config)
     if reader.num_batches("train", config.training.batch_size) < WARMUP_STEPS + TIMED_STEPS:
         raise ValueError("训练集合批次数量不足，无法完成训练测速")
-    batches = iter(reader.iter_batches("train", config.training.batch_size, shuffle=config.schema_version == 3, generator=np.random.Generator(np.random.PCG64(config.seed)), training=True))
+    batches = iter(reader.iter_batches("train", config.training.batch_size, shuffle=config.schema_version >= 3, generator=np.random.Generator(np.random.PCG64(config.seed)), training=True))
     model.train()
     for index in range(WARMUP_STEPS):
         _training_step(model, optimizer, loss_function, next(batches), device, config)
@@ -504,7 +517,7 @@ def run_checks(
                 ),
             }
             entry["compute"] = entry["training_step"].pop("compute")
-            if model_name == "whale" or (config.schema_version == 3 and model_name == "hstu"):
+            if model_name == "whale" or (config.schema_version >= 3 and model_name == "hstu"):
                 entry["weight_roundtrip"] = check_weight_roundtrip(
                     config, reader, device, directory, log, model_name
                 )

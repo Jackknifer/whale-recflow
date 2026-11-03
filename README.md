@@ -13,13 +13,18 @@
 | 监督目标 | 发布的业务反馈 `long_view` |
 | 训练、验证、测试 | 3,000,000 / 100,000 / 200,000 |
 | Embedding 维度、层数 | 64 / 2 |
-| 历史行为上限 | 128 |
+| 历史来源、上限 | 作者 `seq_effective_50_dict` / 50 条有效观看 |
 | 训练轮数、种子 | 1 / 42 |
 
 本项目评价公开数据、小规模条件下的结构表现。原论文的工业数据和规模扩展结论另有实验条件。
 `long_view` 使用数据集的业务定义，不能直接解释为严格完播。
 
-## 实验结果
+当前入口为版本 4 作者历史协议。已完成的版本 3 实验使用 128 条曝光历史，结果独立保留。
+版本 4 的完整五模型指标需要重新训练取得。
+
+## 已完成实验
+
+以下结果来自版本 3 的 [configs/paper.yaml](configs/paper.yaml)，历史规则见[实验报告](docs/experiment.md)。
 
 | 模型 | 测试 AUC ↑ | 测试 LogLoss ↓ | 测试 NE ↓ |
 | --- | ---: | ---: | ---: |
@@ -42,15 +47,17 @@ NE 表示归一化交叉熵，定义与分组结果见[实验报告](docs/experi
 | `whale` | 每层结合 Wukong、HSTU 和 Attention Fusion |
 | `whale_mean_pool` | 用历史均值替代 Attention 读取 |
 
-HSTU 最多处理 257 个 Token，其余历史分支最多处理 128 个 Token。
+版本 4 的 HSTU 最多处理 101 个 Token，其余历史分支最多处理 50 个 Token。
 比较采用相同历史行为数量，各模型计算量分别报告。
 
 ## 复现入口
 
-配置见 [configs/paper.yaml](configs/paper.yaml)，依赖版本由 [uv.lock](uv.lock) 固定。
-已验证环境为 Python 3.13、PyTorch 2.13.0+cu130、RTX 5090 32 GB 和 FP32。
+配置见 [configs/official.yaml](configs/official.yaml)，依赖版本由 [uv.lock](uv.lock) 固定。
+正式训练使用 Python 3.13、CUDA 和 FP32。已有版本 3 运行环境为 RTX 5090 32 GB。
 从 [RecFlow 官方仓库](https://github.com/RecFlow-ICLR/RecFlow)取得 37 个 `realshow` 日文件，放入 `data/raw/RecFlow/`。
 日期范围为 2024-01-13 至 2024-02-18，文件扩展名为 `.feather`。
+作者历史压缩包放在 `data/raw/RecFlow/seq_effective_50_dict.tar.gz`。
+程序直接读取压缩包内的日字典。`pickle` 输入应来自可信的作者数据来源。
 
 <details>
 <summary>最小运行流程</summary>
@@ -59,12 +66,17 @@ HSTU 最多处理 257 个 Token，其余历史分支最多处理 128 个 Token�
 mkdir -p .work/runtime .work/uv-cache
 export TMPDIR="$PWD/.work/runtime" UV_CACHE_DIR="$PWD/.work/uv-cache"
 uv sync --frozen --no-dev
-uv run python scripts/prepare_data.py --config configs/paper.yaml --baseline-config configs/local.yaml
-uv run python scripts/run_experiment.py --config configs/paper.yaml --phase train
-uv run python scripts/export_results.py --config configs/paper.yaml
+uv run python scripts/prepare_data.py --config configs/official.yaml --baseline-config configs/local.yaml
+uv run python scripts/run_experiment.py --config configs/official.yaml --phase check --hourly-rate "${HOURLY_RATE:?请设置实际每小时价格}"
+uv run python scripts/run_experiment.py --config configs/official.yaml --phase train
+uv run python scripts/export_results.py --config configs/official.yaml
+uv run python scripts/export_public_results.py --config configs/official.yaml
 ```
 
-数据加工入口从原始文件重建目标成员。训练输出保存至 `outputs/paper/`。
+`HOURLY_RATE` 为使用者设置的实际每小时价格，单位为人民币。
+加工数据保存至 `data/processed/recflow-official/`，训练输出保存至 `outputs/official/`。
+公开导出保存至 `results/recflow-official/`，已有结果位于 `results/recflow/`。
+目标抽样复用既有规则，三个集合的成员保持一致。
 完整参数见各脚本的 `--help`，公开汇总导出入口为 [export_public_results.py](scripts/export_public_results.py)。
 
 </details>
@@ -72,7 +84,9 @@ uv run python scripts/export_results.py --config configs/paper.yaml
 ## 研究限制
 
 - 单个种子，测试成员曾用于早期实验；结论限定于当前配置。
-- 历史反馈时间使用项目估计，真实反馈回传时刻未知。
+- 作者历史经过严格请求时间过滤，真实反馈回传时刻仍然未知。
+- 作者历史仅含有效观看，历史输入不包含最终 `long_view`。
+- 两套协议的历史数量、行为类型和词表不同，指标需要分别报告。
 - 模型计算量不同，长序列扩展和跨种子稳定性尚未验证。
 
 ## 引用与许可

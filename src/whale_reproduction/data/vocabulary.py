@@ -5,7 +5,6 @@ import numpy as np
 from ..config import Config
 from .raw import (
     CATEGORICAL_FIELDS,
-    HISTORY_FEEDBACK_FIELDS,
     HISTORY_VIDEO_FIELDS,
     ExposureTable,
 )
@@ -34,7 +33,7 @@ class Vocabulary:
             "feedback_offset": self.feedback_offset,
             "categorical_fields": list(CATEGORICAL_FIELDS),
             "history_video_fields": list(HISTORY_VIDEO_FIELDS),
-            "history_feedback_fields": list(HISTORY_FEEDBACK_FIELDS),
+            "history_feedback_fields": list(self.feedback_sizes),
             "fit_scope": "training_inputs_and_their_histories",
         }
 
