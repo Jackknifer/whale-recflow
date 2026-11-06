@@ -68,7 +68,7 @@ class InputEmbedding(nn.Module):
             len(self._history_video_fields) + len(self._history_feedback_fields)
         ) * dim + HISTORY_RELATIVE_AGE_DIM
         self._history_mlp = None
-        if config.name != "hstu" or config.hstu.ranking_input == "pooled":
+        if config.name != "hstu":
             self._history_mlp = nn.Sequential(
                 nn.Linear(history_input, config.sequence_hidden_dim),
                 nn.SiLU(),

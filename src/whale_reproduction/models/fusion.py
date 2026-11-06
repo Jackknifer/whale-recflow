@@ -37,7 +37,6 @@ class FusionBlock(nn.Module):
         nonsequence: torch.Tensor,
         sequence: torch.Tensor,
         history_mask: torch.Tensor,
-        value_override: torch.Tensor | None = None,
     ) -> torch.Tensor:
         present = history_mask.any(dim=1)
         output = torch.zeros_like(nonsequence)
@@ -46,7 +45,7 @@ class FusionBlock(nn.Module):
         selected_sequence = sequence[present]
         query = self._query(self._query_norm(nonsequence[present]))
         key = self._key(self._sequence_norm(selected_sequence))
-        value = self.project_value(selected_sequence) if value_override is None else value_override[present]
+        value = self.project_value(selected_sequence)
         scores = query @ key.transpose(1, 2) / self._dim**0.5
         mask = history_mask[present].unsqueeze(1)
         scores = scores.masked_fill(~mask, float("-inf"))
@@ -66,7 +65,6 @@ class FusionBlock(nn.Module):
         nonsequence: torch.Tensor,
         sequence: torch.Tensor,
         history_mask: torch.Tensor,
-        value_override: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        attended = self.attend(nonsequence, sequence, history_mask, value_override)
+        attended = self.attend(nonsequence, sequence, history_mask)
         return self.fuse(nonsequence, attended)

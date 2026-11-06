@@ -160,12 +160,10 @@ def read_official_histories(
     request_index: RequestIndex,
     history_requests: dict[str, np.ndarray],
 ) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray], dict[str, Any]]:
-    if not config.data.uses_official_history or config.data.history_archive is None:
-        raise ValueError("作者历史读取需要独立配置和作者压缩包")
     path = PROJECT_ROOT / config.data.history_archive
     if not path.is_file():
         raise FileNotFoundError(f"作者历史压缩包不存在：{path}")
-    if config.data.max_history_length != OFFICIAL_LENGTH or request_index.available_ms is not None:
+    if config.data.max_history_length != OFFICIAL_LENGTH:
         raise ValueError("作者历史需要 50 条上限及原始请求时间")
     started = time.perf_counter()
     lookup = ExposureLookup(exposure)

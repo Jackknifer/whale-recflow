@@ -2,11 +2,10 @@ schema_version: 4
 project: whale-reproduction
 seed: 42
 experiment:
-  models: [wukong, hstu, shallow_hybrid, whale, whale_mean_pool]
+  models: [wukong, hstu, whale]
   runs_per_model: 1
   parallel_runs: 1
   output_root: outputs/official
-  baseline_indices: outputs/runs/whale-s42/target_indices.npz
 runtime:
   python: "3.13"
   device: cuda
@@ -32,7 +31,7 @@ data:
     train: 3000000
     validation: 100000
     test: 200000
-  sampling: extend_baseline_uniform_without_replacement
+  sampling: two_stage_uniform_without_replacement
   extension_seed: [42, 3000000]
   max_history_length: 50
   history_source: seq_effective_50_dict

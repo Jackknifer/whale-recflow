@@ -5,9 +5,6 @@ from torch import nn
 
 from ..config import ModelConfig
 
-POSITION_BIAS_CENTER = 0
-
-
 class HSTUBlock(nn.Module):
     def __init__(self, config: ModelConfig, max_history_length: int) -> None:
         super().__init__()
@@ -125,10 +122,3 @@ class HSTUStack(nn.Module):
         for block in self._blocks:
             tokens = block(tokens, time_bucket, causal_mask) * mask
         return tokens
-
-    def pooled_representation(
-        self, tokens: torch.Tensor, history_mask: torch.Tensor
-    ) -> torch.Tensor:
-        weights = history_mask.unsqueeze(-1).to(tokens.dtype)
-        total = weights.sum(dim=1)
-        return (tokens * weights).sum(dim=1) / total.clamp(min=1.0)

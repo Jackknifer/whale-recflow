@@ -4,51 +4,21 @@ from pathlib import Path
 
 from whale_reproduction.config import load_config
 from whale_reproduction.data.prepare import prepare
-from whale_reproduction.utils import Stopwatch, format_seconds, write_json
+from whale_reproduction.utils import Stopwatch, format_seconds
 
 
 def parse_arguments(argv: list[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="生成五模型共用的 RecFlow 加工数据")
-    parser.add_argument("--config", required=True, type=Path, help="配置文件路径")
-    parser.add_argument(
-        "--baseline-config", type=Path,
-        help="显式从版本 2 配置重建基线成员，用于版本 3、4 的目标抽样",
-    )
+    parser = argparse.ArgumentParser(description="生成三模型共用的 RecFlow 加工数据")
+    parser.add_argument("--config", default=Path("configs/official.yaml"), type=Path, help="配置文件路径")
     return parser.parse_args(argv)
 
 
 def main(argv: list[str]) -> int:
     arguments = parse_arguments(argv)
     config = load_config(arguments.config)
-    baseline_config = load_config(arguments.baseline_config) if arguments.baseline_config else None
     with Stopwatch() as stopwatch:
-        metadata = prepare(config, baseline_config=baseline_config)
+        metadata = prepare(config)
     root = config.processed_directory()
-    write_json(
-        root / "prepare_summary.json",
-        {
-            "elapsed_seconds": stopwatch.elapsed,
-            "processed_root": str(root),
-            "event_count": metadata["event_count"],
-            "request_count": metadata["request_count"],
-            "source_file_count": metadata["source_file_count"],
-            "schema_version": config.schema_version,
-            "history_conditions": metadata["history_conditions"],
-            "processed_bytes": metadata["processed_bytes"],
-            "splits": {
-                split: {
-                    "target_count": entry["target_count"],
-                    "request_count": entry["request_count"],
-                    "positive_rate": entry["positive_rate"],
-                    "history_length_mean": entry["history_length_mean"],
-                    "empty_history_count": entry["empty_history_count"],
-                    "full_history_count": entry["full_history_count"],
-                }
-                for split, entry in metadata["splits"].items()
-            },
-            "vocabulary_sizes": metadata["vocabulary_sizes"],
-        },
-    )
     print(f"加工数据保存至 {root}")
     print(
         f"曝光记录 {metadata['event_count']:,} 条，"

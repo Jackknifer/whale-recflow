@@ -8,7 +8,6 @@ import numpy as np
 
 from ..config import Config
 from ..utils import current_timestamp, write_json
-from .history import HistoryReader, build_history_index
 from .official_history import read_official_histories
 from .preprocessing import fit_numerical_parameters, raw_numerical_values
 from .raw import (
@@ -21,7 +20,6 @@ from .store import save_processed
 from .vocabulary import fit_vocabulary
 
 HISTORY_CHUNK = 8192
-STATISTICS_CHUNK = 20000
 
 
 def _host_memory() -> dict[str, int]:
@@ -50,7 +48,7 @@ def history_statistics(
     target_positions: np.ndarray,
     max_length: int,
     unknown_masks: dict[str, np.ndarray] | None = None,
-    feedback_fields: tuple[str, ...] = ("effective_view", "long_view"),
+    feedback_fields: tuple[str, ...] = ("effective_view",),
 ) -> dict[str, Any]:
     lengths = history_counts[target_positions].astype(np.int64)
     weights = np.bincount(target_positions, minlength=history_counts.size)
@@ -77,8 +75,6 @@ def history_statistics(
         "empty_history_count": int((lengths == 0).sum()),
         "full_history_count": int((lengths >= max_length).sum()),
         "c32": float((lengths >= 32).mean()),
-        "c64": float((lengths >= 64).mean()),
-        "c128": float((lengths >= 128).mean()),
         **({"c50": float((lengths >= 50).mean())} if max_length == 50 else {}),
         **{f"history_{field}_positive": value for field, value in feedback_positive.items()},
         "history_total_positions": total_positions,
@@ -99,69 +95,35 @@ def unknown_ratios(
     return ratios
 
 
-def prepare(config: Config, *, baseline_config: Config | None = None) -> dict[str, Any]:
+def prepare(config: Config) -> dict[str, Any]:
     directory = config.processed_directory()
     if directory.exists() and any(directory.iterdir()):
         raise FileExistsError(f"加工目录已有内容，不能覆盖已有数据：{directory}")
     started = time.perf_counter()
     windows = split_windows(config)
     exposure, sources = read_exposure(config)
-    request_index = build_request_index(exposure, config.data.request_gap_ms)
+    request_index = build_request_index(exposure)
     candidates = candidate_rows(exposure, config)
-    target_rows = sample_targets(exposure, config, candidates, baseline_config=baseline_config)
-
-    reader = None
-    if not config.data.uses_official_history:
-        history_index = build_history_index(exposure, request_index)
-        reader = HistoryReader(history_index, config.data.max_history_length)
-    history_rows: dict[str, np.ndarray] = {}
-    history_counts: dict[str, np.ndarray] = {}
+    target_rows = sample_targets(exposure, config, candidates)
     history_requests: dict[str, np.ndarray] = {}
     history_target_positions: dict[str, np.ndarray] = {}
     for split in SPLIT_ORDER:
         rows = target_rows[split]
-        requests, first, inverse = np.unique(
-            exposure.request_id[rows], return_index=True, return_inverse=True
-        )
-        representative = rows[first]
+        requests, inverse = np.unique(exposure.request_id[rows], return_inverse=True)
         history_requests[split] = requests.astype(np.int64)
         history_target_positions[split] = inverse.astype(np.int32)
-        if reader is None:
-            continue
-        collected = np.full(
-            (requests.size, config.data.max_history_length), -1, dtype=np.int32
-        )
-        counts = np.zeros(requests.size, dtype=np.int32)
-        for start in range(0, requests.size, HISTORY_CHUNK):
-            end = min(start + HISTORY_CHUNK, requests.size)
-            chunk = representative[start:end]
-            chunk_rows, chunk_counts = reader.gather(
-                exposure.user_id[chunk].astype(np.int64),
-                exposure.request_timestamp[chunk],
-                exposure.request_id[chunk].astype(np.int64),
-            )
-            collected[start:end] = chunk_rows.astype(np.int32)
-            counts[start:end] = chunk_counts
-        history_rows[split] = collected
-        history_counts[split] = counts
-    official_audit = None
-    if config.data.uses_official_history:
-        history_rows, history_counts, official_audit = read_official_histories(
-            config, exposure, request_index, history_requests
-        )
-    else:
-        del reader, history_index
+    history_rows, history_counts, official_audit = read_official_histories(
+        config, exposure, request_index, history_requests
+    )
 
     train_rows = target_rows["train"]
     train_history = history_rows["train"]
     vocabulary = fit_vocabulary(config, exposure, train_rows, train_history)
     numerical = fit_numerical_parameters(numerical_inputs(exposure, train_rows))
-    unknown_masks = None
-    if config.schema_version >= 3:
-        unknown_masks = {
-            field: vocabulary.encode(field, exposure.video_attribute(field)) == vocabulary.unknown_index
-            for field in config.data.history_video_fields
-        }
+    unknown_masks = {
+        field: vocabulary.encode(field, exposure.video_attribute(field)) == vocabulary.unknown_index
+        for field in config.data.history_video_fields
+    }
 
     split_metadata: dict[str, Any] = {}
     for split in SPLIT_ORDER:
@@ -227,13 +189,13 @@ def prepare(config: Config, *, baseline_config: Config | None = None) -> dict[st
             "same_user": True,
             "different_request": True,
             "request_time_strictly_before": True,
-            "available_time_strictly_before": True,
-            "availability": "request_timestamp + sum(playing_time) + request_gap_ms",
-            "playing_time_unit": config.data.playing_time_unit,
-            "request_gap_ms": config.data.request_gap_ms,
+            "availability": config.data.history_availability,
+            "feedback_completion_time_verified": False,
+            "feedback_fields": list(config.data.history_feedback_fields),
+            "effective_view_required": 1,
             "order": "(request_timestamp, request_id, event_id)",
             "padding_side": config.data.padding_side,
-            "policy": "rolling_observed",
+            "policy": "author_supplied_members_with_strict_request_time_filter",
         },
         "environment": {
             "python": platform.python_version(),
@@ -244,25 +206,8 @@ def prepare(config: Config, *, baseline_config: Config | None = None) -> dict[st
         "prepare_seconds": float(time.perf_counter() - started),
         "host_memory": _host_memory(),
     }
-    if config.data.uses_official_history:
-        metadata["history_conditions"] = {
-            "source": config.data.history_source,
-            "same_user": True,
-            "different_request": True,
-            "request_time_strictly_before": True,
-            "availability": config.data.history_availability,
-            "feedback_completion_time_verified": False,
-            "feedback_fields": list(config.data.history_feedback_fields),
-            "effective_view_required": 1,
-            "order": "(request_timestamp, request_id, event_id)",
-            "padding_side": config.data.padding_side,
-            "policy": "author_supplied_members_with_strict_request_time_filter",
-        }
-        metadata["official_history_audit"] = official_audit
-    if config.schema_version >= 3:
-        metadata["processed_format_version"] = config.schema_version
-    if baseline_config is not None:
-        metadata["reconstructed_baseline_config"] = baseline_config.snapshot()
+    metadata["official_history_audit"] = official_audit
+    metadata["processed_format_version"] = config.schema_version
     root = save_processed(
         config,
         exposure,

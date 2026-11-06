@@ -29,8 +29,6 @@ WARMUP_STEPS = 3
 TIMED_STEPS = 8
 EVALUATION_WARMUP_BATCHES = 3
 EVALUATION_TIMED_BATCHES = 8
-DEFAULT_OVERHEAD_HOURS = 1.0
-MAX_TOTAL_COST_CNY = 100.0
 TARGET_INDICES_FILE = "target_indices.npz"
 
 
@@ -70,22 +68,12 @@ def check_data(
         raise ValueError("历史检查失败：存在属于其他用户的历史事件")
     if not (history_time[valid] < time_broadcast[valid]).all():
         raise ValueError("历史检查失败：存在请求时间不早于目标请求时间的历史事件")
-    if config.data.uses_official_history:
-        if reader.event_available_ms is not None:
-            raise ValueError("作者历史不应包含估计可用时间")
-        if config.data.history_feedback_fields != ("effective_view",):
-            raise ValueError("作者历史反馈字段与当前协议不一致")
-        if np.any(valid & (exposure.effective_view[safe] != 1)):
-            raise ValueError("作者历史存在无效观看事件")
-        audit = reader.data_context["official_history"]
-        if not audit["complete"]:
-            raise ValueError("作者历史来源尚未完成核验")
-    else:
-        if reader.event_available_ms is None:
-            raise ValueError("曝光历史缺少请求可用时间")
-        history_available = np.where(valid, reader.event_available_ms[safe], 0)
-        if not (history_available[valid] < time_broadcast[valid]).all():
-            raise ValueError("历史检查失败：存在可用时间不早于目标请求时间的历史事件")
+    if config.data.history_feedback_fields != ("effective_view",):
+        raise ValueError("作者历史反馈字段与当前协议不一致")
+    if np.any(valid & (exposure.effective_view[safe] != 1)):
+        raise ValueError("作者历史存在无效观看事件")
+    if not reader.data_context["official_history"]["complete"]:
+        raise ValueError("作者历史来源尚未完成核验")
     if not (history_request[valid] != request_broadcast[valid]).all():
         raise ValueError("历史检查失败：存在与目标同请求的历史事件")
     if counts.max() > reader.max_history_length:
@@ -156,9 +144,9 @@ def check_data(
         "same_user_verified": True,
         "different_request_verified": True,
         "strict_request_time_verified": True,
-        **({"official_history_membership_verified": True, "effective_view_verified": True,
-            "feedback_completion_time_verified": False}
-           if config.data.uses_official_history else {"strict_availability_verified": True}),
+        "official_history_membership_verified": True,
+        "effective_view_verified": True,
+        "feedback_completion_time_verified": False,
     }
 
 
@@ -174,10 +162,9 @@ def check_training_step(
     optimizer = build_optimizer(config, model)
     loss_function = build_loss(config)
     _, batch = _representative_batch(config, reader, "train")
-    if config.schema_version >= 3:
-        batch = reader.mask_training_batch(batch, 0, 0)
+    batch = reader.mask_training_batch(batch, 0, 0)
     tensors = batch.as_tensors(device)
-    ranking_report = check_ranking_path(model, tensors) if model_name == "hstu" and config.schema_version >= 3 else None
+    ranking_report = check_ranking_path(model, tensors) if model_name == "hstu" else None
     labels = torch.from_numpy(batch.labels).to(device)
     model.train()
     optimizer.zero_grad(set_to_none=True)
@@ -189,13 +176,12 @@ def check_training_step(
         raise ValueError(f"{model_name} 损失不是有限值")
     loss.backward()
     unknown_gradients = {}
-    if config.schema_version >= 3:
-        for field in config.training.id_mask_fields:
-            gradient = model._embedding._categorical[field].weight.grad
-            norm = float(gradient[1].norm()) if gradient is not None else 0.0
-            if norm <= 0.0 or not np.isfinite(norm):
-                raise ValueError(f"{model_name} 的 {field} UNK 行没有有效梯度")
-            unknown_gradients[field] = norm
+    for field in config.training.id_mask_fields:
+        gradient = model._embedding._categorical[field].weight.grad
+        norm = float(gradient[1].norm()) if gradient is not None else 0.0
+        if norm <= 0.0 or not np.isfinite(norm):
+            raise ValueError(f"{model_name} 的 {field} UNK 行没有有效梯度")
+        unknown_gradients[field] = norm
     gradient_norm = torch.nn.utils.clip_grad_norm_(
         model.parameters(), config.training.gradient_clip_norm
     )
@@ -315,7 +301,7 @@ def measure_training_speed(
     loss_function = build_loss(config)
     if reader.num_batches("train", config.training.batch_size) < WARMUP_STEPS + TIMED_STEPS:
         raise ValueError("训练集合批次数量不足，无法完成训练测速")
-    batches = iter(reader.iter_batches("train", config.training.batch_size, shuffle=config.schema_version >= 3, generator=np.random.Generator(np.random.PCG64(config.seed)), training=True))
+    batches = iter(reader.iter_batches("train", config.training.batch_size, shuffle=True, generator=np.random.Generator(np.random.PCG64(config.seed)), training=True))
     model.train()
     for index in range(WARMUP_STEPS):
         _training_step(model, optimizer, loss_function, next(batches), device, config)
@@ -438,59 +424,11 @@ def estimate_memory(config: Config, reader: BatchReader, model_name: str) -> dic
     }
 
 
-def estimate_cost(config: Config, results: dict[str, Any]) -> dict[str, Any]:
-    batch_size = config.training.batch_size
-    epochs = config.training.max_epochs
-    train_batches = -(-int(config.data.target_samples["train"]) // batch_size)
-    validation_batches = -(-int(config.data.target_samples["validation"]) // batch_size)
-    test_batches = -(-int(config.data.target_samples["test"]) // batch_size)
-    models: dict[str, Any] = {}
-    total_seconds = 0.0
-    for name, entry in results["models"].items():
-        train_time = entry["training_speed"]["seconds_per_batch"]
-        eval_time = entry["evaluation_speed"]["seconds_per_batch"]
-        seconds = (
-            epochs * train_batches * train_time
-            + (epochs * validation_batches + test_batches) * eval_time
-        )
-        models[name] = {
-            "training_seconds": seconds,
-            "training_hours": seconds / 3600.0,
-            "peak_memory_gib": entry["training_speed"]["peak_memory_gib"],
-            "train_batches_per_epoch": train_batches,
-            "validation_batches_per_epoch": validation_batches,
-            "test_batches": test_batches,
-            "training_updates": epochs * train_batches,
-            "evaluation_batches": epochs * validation_batches + test_batches,
-        }
-        total_seconds += seconds
-    hourly_rate = float(results["hourly_rate_cny"])
-    overhead_hours = float(results.get("overhead_hours", DEFAULT_OVERHEAD_HOURS))
-    total_hours = total_seconds / 3600.0 + overhead_hours
-    return {
-        "batch_size": batch_size,
-        "epochs": epochs,
-        "train_batches_per_epoch": train_batches,
-        "validation_batches_per_epoch": validation_batches,
-        "test_batches": test_batches,
-        "models": models,
-        "total_training_seconds": total_seconds,
-        "total_training_hours": total_seconds / 3600.0,
-        "overhead_hours": overhead_hours,
-        "total_hours_with_overhead": total_hours,
-        "hourly_rate_cny": hourly_rate,
-        "estimated_cost_cny": total_hours * hourly_rate,
-    }
-
-
 def run_checks(
     config: Config,
     reader: BatchReader,
     device: torch.device,
-    hourly_rate: float | None = None,
 ) -> dict[str, Any]:
-    if hourly_rate is None or not np.isfinite(hourly_rate) or hourly_rate <= 0:
-        raise ValueError("必要检查需要通过 --hourly-rate 提供实际正数单价")
     directory = config.checks_directory()
     ensure_directory(directory)
     results: dict[str, Any] = {
@@ -500,8 +438,6 @@ def run_checks(
         "environment": environment_record(device),
         "config": config.snapshot(),
         "data_context": reader.data_context,
-        "hourly_rate_cny": float(hourly_rate),
-        "overhead_hours": DEFAULT_OVERHEAD_HOURS,
         "models": {},
     }
     write_json(directory / "check.json", results)
@@ -517,7 +453,7 @@ def run_checks(
                 ),
             }
             entry["compute"] = entry["training_step"].pop("compute")
-            if model_name == "whale" or (config.schema_version >= 3 and model_name == "hstu"):
+            if model_name in ("whale", "hstu"):
                 entry["weight_roundtrip"] = check_weight_roundtrip(
                     config, reader, device, directory, log, model_name
                 )
@@ -528,7 +464,6 @@ def run_checks(
                 config, reader, model_name, device, log
             )
             results["models"][model_name] = entry
-        results["estimate"] = estimate_cost(config, results)
         results["status"] = "passed"
         write_json(directory / "check.json", results)
         log.write("集中必要检查结束")
@@ -548,8 +483,5 @@ def verify_checks(config: Config, reader: BatchReader, device: torch.device) -> 
             raise ValueError(f"当前环境的 {field} 与必要检查记录不一致")
     reader.verify_target_indices(directory / TARGET_INDICES_FILE)
     if tuple(results["models"]) != config.model_names:
-        raise ValueError("必要检查没有覆盖全部五种模型")
-    cost = float(results["estimate"]["estimated_cost_cny"])
-    if not np.isfinite(cost) or cost <= 0.0 or cost > MAX_TOTAL_COST_CNY:
-        raise ValueError("预计费用不在已授权预算内，需要用户决定后续运行")
+        raise ValueError("必要检查没有覆盖全部三种模型")
     return results

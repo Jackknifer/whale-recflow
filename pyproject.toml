@@ -13,7 +13,6 @@ dependencies = [
     "numpy>=2.3,<3",
     "pandas>=2.3,<4",
     "pyarrow>=18,<27",
-    "duckdb>=1.4,<2",
     "scikit-learn>=1.7,<2",
     "pyyaml>=6.0,<7",
 ]
@@ -28,8 +27,8 @@ packages = ["src/whale_reproduction"]
 [tool.hatch.build.targets.sdist]
 include = [
     "src/whale_reproduction", "scripts", "configs", "results", "LICENSES",
-    "docs/research.md", "docs/experiment.md", "README.md", "LICENSE", "NOTICE",
-    "CITATION.cff", "pyproject.toml", "uv.lock", ".python-version",
+    "README.md", "LICENSE", "NOTICE",
+    "pyproject.toml", "uv.lock", ".python-version",
     ".gitignore", ".gitattributes", ".github",
 ]
 

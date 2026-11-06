@@ -1,0 +1,70 @@
+{
+  "data_source": "https://github.com/RecFlow-ICLR/RecFlow",
+  "license": "CC-BY-SA-4.0",
+  "label": "long_view",
+  "dates": [
+    "2024-01-13",
+    "2024-02-18"
+  ],
+  "samples": {
+    "train": 3000000,
+    "validation": 100000,
+    "test": 200000
+  },
+  "history_source": "seq_effective_50_dict",
+  "max_history_length": 50,
+  "history_conditions": {
+    "source": "seq_effective_50_dict",
+    "same_user": true,
+    "different_request": true,
+    "request_time_strictly_before": true,
+    "availability": "official_history_strict_request_time",
+    "feedback_completion_time_verified": false,
+    "feedback_fields": [
+      "effective_view"
+    ],
+    "effective_view_required": 1,
+    "order": "(request_timestamp, request_id, event_id)",
+    "padding_side": "right",
+    "policy": "author_supplied_members_with_strict_request_time_filter"
+  },
+  "seed": 42,
+  "embedding_dim": 64,
+  "num_layers": 2,
+  "training": {
+    "batch_size": 256,
+    "optimizer": "adamw",
+    "learning_rate": 0.001,
+    "weight_decay": 1e-05,
+    "loss": "bce_with_logits",
+    "gradient_clip_norm": 1.0,
+    "sample_order": "daily_shuffle",
+    "id_mask_probability": 0.05,
+    "early_stopping_patience": 1,
+    "early_stopping_min_delta": 1e-06
+  },
+  "experiments": [
+    {
+      "max_epochs": 1,
+      "date": "2026-11-03",
+      "selection": "final_epoch_only",
+      "environment": {
+        "python": "3.13.18",
+        "torch": "2.13.0+cu130",
+        "torch_cuda": "13.0",
+        "device": "NVIDIA GeForce RTX 4090"
+      }
+    },
+    {
+      "max_epochs": 3,
+      "date": "2026-11-03",
+      "selection": "selected_checkpoint_only",
+      "environment": {
+        "python": "3.13.18",
+        "torch": "2.13.0+cu130",
+        "torch_cuda": "13.0",
+        "device": "NVIDIA GeForce RTX 4090"
+      }
+    }
+  ]
+}

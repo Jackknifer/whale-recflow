@@ -1,5 +1,4 @@
 from .batch import Batch, BatchReader
-from .history import HistoryIndex, HistoryReader, build_history_index
 from .prepare import prepare
 from .preprocessing import NumericalParameters
 from .raw import (
@@ -24,15 +23,12 @@ __all__ = [
     "ExposureTable",
     "HISTORY_FEEDBACK_FIELDS",
     "HISTORY_VIDEO_FIELDS",
-    "HistoryIndex",
-    "HistoryReader",
     "NumericalParameters",
     "ProcessedData",
     "RequestIndex",
     "SPLIT_ORDER",
     "SourceFile",
     "Vocabulary",
-    "build_history_index",
     "build_request_index",
     "candidate_rows",
     "fit_vocabulary",

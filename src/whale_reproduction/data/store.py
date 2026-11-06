@@ -54,7 +54,6 @@ REQUEST_COLUMNS = (
     "request_id",
     "user_id",
     "request_timestamp",
-    "available_ms",
     "event_counts",
 )
 
@@ -71,7 +70,6 @@ class ProcessedData:
     history_counts: dict[str, np.ndarray]
     history_requests: dict[str, np.ndarray]
     history_target_positions: dict[str, np.ndarray]
-    event_available_ms: np.ndarray | None
     config: Config
 
     @property
@@ -114,18 +112,14 @@ def _exposure_from_frame(frame: pd.DataFrame) -> ExposureTable:
     )
 
 
-def _request_index_from_frame(frame: pd.DataFrame, official_history: bool = False) -> RequestIndex:
-    required = tuple(name for name in REQUEST_COLUMNS if name != "available_ms") if official_history else REQUEST_COLUMNS
-    missing = [name for name in required if name not in frame.columns]
+def _request_index_from_frame(frame: pd.DataFrame) -> RequestIndex:
+    missing = [name for name in REQUEST_COLUMNS if name not in frame.columns]
     if missing:
         raise ValueError(f"请求文件缺少字段 {missing}")
-    if official_history and "available_ms" in frame.columns:
-        raise ValueError("作者历史请求文件不应包含估计可用时间")
     return RequestIndex(
         request_ids=frame["request_id"].to_numpy(dtype=np.int64),
         user_id=frame["user_id"].to_numpy(dtype=np.int32),
         request_timestamp=frame["request_timestamp"].to_numpy(dtype=np.int64),
-        available_ms=None if official_history else frame["available_ms"].to_numpy(dtype=np.int64),
         event_counts=frame["event_counts"].to_numpy(dtype=np.int32),
     )
 
@@ -163,7 +157,6 @@ def _request_frame(index: RequestIndex) -> pd.DataFrame:
             "request_id": index.request_ids,
             "user_id": index.user_id,
             "request_timestamp": index.request_timestamp,
-            **({"available_ms": index.available_ms} if index.available_ms is not None else {}),
             "event_counts": index.event_counts,
         }
     )
@@ -237,7 +230,7 @@ def load_processed(config: Config) -> ProcessedData:
                 f"加工数据缺少文件 {root / name}，请先执行 prepare_data"
             )
     metadata = read_json(root / METADATA_FILE)
-    if config.schema_version >= 3 and metadata.get("processed_format_version") != config.schema_version:
+    if metadata.get("processed_format_version") != config.schema_version:
         raise ValueError("加工格式版本与配置版本不一致")
     if metadata.get("preprocessing_config") != config.preprocessing_snapshot():
         raise ValueError("加工数据的日期、抽样或预处理规则与当前配置不一致")
@@ -263,7 +256,7 @@ def load_processed(config: Config) -> ProcessedData:
         raise ValueError("加工数据的来源文件清单与当前配置不一致")
 
     exposure = _exposure_from_frame(pd.read_parquet(root / EXPOSURE_FILE))
-    request_index = _request_index_from_frame(pd.read_parquet(root / REQUEST_FILE), config.data.uses_official_history)
+    request_index = _request_index_from_frame(pd.read_parquet(root / REQUEST_FILE))
     payload = read_json(root / PREPROCESSING_FILE)
     with np.load(root / VOCABULARY_FILE) as archive:
         raw_values = {field: archive[field].copy() for field in CATEGORICAL_FIELDS}
@@ -323,14 +316,13 @@ def load_processed(config: Config) -> ProcessedData:
             raise ValueError(f"数据集合 {split} 的目标与历史请求映射无效")
         if not np.array_equal(requests[mapping], exposure.request_id[rows]):
             raise ValueError(f"数据集合 {split} 的历史请求与目标请求不一致")
-        if config.data.uses_official_history:
-            audit = metadata["official_history_audit"]
-            if not audit["complete"] or {day["day"] for day in audit["days"]} != set(config.data.file_dates()):
-                raise ValueError("作者历史来源日期不完整")
-            verify_official_history_rows(
-                exposure, request_index, requests, history_rows[split],
-                history_counts[split], audit["splits"][split],
-            )
+        audit = metadata["official_history_audit"]
+        if not audit["complete"] or {day["day"] for day in audit["days"]} != set(config.data.file_dates()):
+            raise ValueError("作者历史来源日期不完整")
+        verify_official_history_rows(
+            exposure, request_index, requests, history_rows[split],
+            history_counts[split], audit["splits"][split],
+        )
     event_slot = request_index.positions(exposure.request_id)
     if np.any(event_slot < 0):
         raise ValueError("曝光记录的 request_id 未出现在请求索引中")
@@ -345,6 +337,5 @@ def load_processed(config: Config) -> ProcessedData:
         history_counts=history_counts,
         history_requests=history_requests,
         history_target_positions=history_target_positions,
-        event_available_ms=None if request_index.available_ms is None else request_index.available_ms[event_slot],
         config=config,
     )

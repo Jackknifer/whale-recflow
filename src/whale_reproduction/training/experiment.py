@@ -83,12 +83,11 @@ def run_final_test(
         event_id = predictions["event_id"].to_numpy(dtype=np.int64)
         request_id = predictions["request_id"].to_numpy(dtype=np.int64)
         duration_ms = predictions["duration_ms"].to_numpy(dtype=np.int64)
-        if config.schema_version >= 3:
-            video_unknown = predictions["video_is_unknown"].to_numpy(dtype=bool)
-            author_unknown = predictions["author_is_unknown"].to_numpy(dtype=bool)
-            for field, actual in (("video_id", video_unknown), ("author_id", author_unknown)):
-                if not np.array_equal(actual, reader.target_unknown("test", field)):
-                    raise ValueError(f"保存的 {field} 自然 UNK 标记与当前字典不一致")
+        video_unknown = predictions["video_is_unknown"].to_numpy(dtype=bool)
+        author_unknown = predictions["author_is_unknown"].to_numpy(dtype=bool)
+        for field, actual in (("video_id", video_unknown), ("author_id", author_unknown)):
+            if not np.array_equal(actual, reader.target_unknown("test", field)):
+                raise ValueError(f"保存的 {field} 自然 UNK 标记与当前字典不一致")
     else:
         model = load_model_for_evaluation(config, model_name, reader, device, best_epoch)
         logits, labels, event_id, request_id, duration_ms, video_unknown, author_unknown = collect_predictions(
@@ -115,14 +114,12 @@ def run_final_test(
                 "probability": probabilities.astype(np.float64),
                 "duration_ms": duration_ms.astype(np.int64),
             }
-        if config.schema_version >= 3:
-            columns.update(video_is_unknown=video_unknown, author_is_unknown=author_unknown)
+        columns.update(video_is_unknown=video_unknown, author_is_unknown=author_unknown)
         pd.DataFrame(columns).to_parquet(temporary, index=False)
         temporary.replace(prediction_path)
     groups = duration_groups(config, labels, logits, duration_ms)
-    identifiers = id_groups(labels, logits, video_unknown, author_unknown) if config.schema_version >= 3 else []
-    if config.schema_version >= 3:
-        write_json(run_directory / "id_groups.json", {"model": model_name, "groups": identifiers})
+    identifiers = id_groups(labels, logits, video_unknown, author_unknown)
+    write_json(run_directory / "id_groups.json", {"model": model_name, "groups": identifiers})
     write_json(
         run_directory / DURATION_GROUPS_FILE,
         {"model": model_name, "groups": groups},
@@ -223,12 +220,10 @@ def run_single_model(
         "parameters": parameters,
         "duration_groups": groups,
     }
-    if config.schema_version >= 3:
-        record["id_groups"] = identifiers
-        record["compute"] = check_results["models"][model_name]["compute"]
-        record["training_protocol"] = config.snapshot()["training"]
-    if config.data.uses_official_history:
-        record["history_protocol"] = reader.data_context["history_conditions"]
+    record["id_groups"] = identifiers
+    record["compute"] = check_results["models"][model_name]["compute"]
+    record["training_protocol"] = config.snapshot()["training"]
+    record["history_protocol"] = reader.data_context["history_conditions"]
     write_json(
         run_directory / METRICS_FILE,
         {

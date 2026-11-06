@@ -1,4 +1,4 @@
-from .checks import estimate_cost, estimate_memory, run_checks
+from .checks import estimate_memory, run_checks
 from .evaluate import collect_logits, collect_predictions
 from .experiment import run_all_models, run_final_test, run_single_model
 from .grouping import (
@@ -39,7 +39,6 @@ __all__ = [
     "collect_predictions",
     "compute_metrics",
     "duration_groups",
-    "estimate_cost",
     "estimate_memory",
     "group_metrics",
     "parameter_report",

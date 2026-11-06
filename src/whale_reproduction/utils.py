@@ -75,12 +75,6 @@ def resolve_device(config: Config) -> torch.device:
     return device
 
 
-def resolve_dtype(config: Config) -> torch.dtype:
-    if config.runtime.dtype != "float32":
-        raise ValueError(f"正式实验要求 FP32，配置为 {config.runtime.dtype}")
-    return torch.float32
-
-
 def environment_record(device: torch.device) -> dict[str, Any]:
     if device.type == "cpu":
         return {

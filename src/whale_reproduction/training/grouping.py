@@ -123,7 +123,7 @@ def id_groups(labels: np.ndarray, logits: np.ndarray, video_unknown: np.ndarray,
 def build_deltas(
     records: dict[str, dict[str, float]],
     reference: str = "whale",
-    baselines: tuple[str, ...] = ("shallow_hybrid", "whale_mean_pool"),
+    baselines: tuple[str, ...] = ("wukong", "hstu"),
 ) -> dict[str, Any]:
     if reference not in records:
         raise KeyError(f"差值计算缺少参照模型 {reference}")

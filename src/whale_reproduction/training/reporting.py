@@ -10,11 +10,8 @@ from .grouping import build_deltas
 
 COMPARISON_FILE = "comparison.csv"
 DURATION_FILE = "duration-groups.csv"
-DELTAS_FILE = "deltas.json"
 SUMMARY_FILE = "summary.json"
 PRIMARY_MODEL = "whale"
-SHALLOW_BASELINE = "shallow_hybrid"
-MEAN_POOL_ABLATION = "whale_mean_pool"
 COMPARISON_COLUMNS = (
     "model",
     "auc",
@@ -74,14 +71,14 @@ def collect_records(config: Config) -> list[dict[str, Any]]:
         if reference_context is None:
             reference_context = context["data_context"]
         elif reference_context != context["data_context"]:
-            raise ValueError("五种模型的数据来源或预处理参数不一致")
+            raise ValueError("比较模型的数据来源或预处理参数不一致")
         with np.load(path.parent / "target_indices.npz", allow_pickle=False) as indices:
             if reference_indices is None:
                 reference_indices = {name: indices[name].copy() for name in indices.files}
             elif set(indices.files) != set(reference_indices) or any(
                 not np.array_equal(indices[name], reference_indices[name]) for name in indices.files
             ):
-                raise ValueError("五种模型的完整目标索引或事件编号不一致")
+                raise ValueError("比较模型的完整目标索引或事件编号不一致")
         if record["final_test_count"] != config.data.target_samples["test"]:
             raise ValueError(f"模型 {model_name} 的最终测试数量与配置不一致")
         final_test = record["final_test"]
@@ -104,22 +101,11 @@ def collect_records(config: Config) -> list[dict[str, Any]]:
                 "peak_memory_gib": float(record["peak_memory_gib"]),
                 "test_count": int(record["final_test_count"]),
                 "duration_groups": record["duration_groups"],
-                **({"id_groups": record["id_groups"], "compute": record["compute"]} if config.schema_version >= 3 else {}),
+                "id_groups": record["id_groups"],
+                "compute": record["compute"],
             }
         )
     return records
-
-
-def _metrics_of(records: list[dict[str, Any]], model_name: str) -> dict[str, float]:
-    selected = [item for item in records if item["model"] == model_name]
-    if len(selected) != 1:
-        raise ValueError(f"比较表缺少模型 {model_name} 的唯一记录")
-    row = selected[0]
-    return {
-        "auc": row["auc"],
-        "logloss": row["logloss"],
-        "ne": row["ne"],
-    }
 
 
 def build_duration_frame(records: list[dict[str, Any]]) -> pd.DataFrame:
@@ -149,10 +135,9 @@ def build_duration_frame(records: list[dict[str, Any]]) -> pd.DataFrame:
 def build_comparison(config: Config) -> tuple[pd.DataFrame, dict[str, Any]]:
     records = collect_records(config)
     frame = pd.DataFrame(records)[list(COMPARISON_COLUMNS)]
-    if config.schema_version >= 3:
-        frame["matrix_forward_flops_per_sample"] = [record["compute"]["matrix_forward_flops_per_sample"] for record in records]
-        frame["history_behaviors"] = config.data.max_history_length
-        frame["max_sequence_tokens"] = [record["compute"]["max_sequence_tokens"] for record in records]
+    frame["matrix_forward_flops_per_sample"] = [record["compute"]["matrix_forward_flops_per_sample"] for record in records]
+    frame["history_behaviors"] = config.data.max_history_length
+    frame["max_sequence_tokens"] = [record["compute"]["max_sequence_tokens"] for record in records]
     directory = config.results_directory()
     ensure_directory(directory)
     frame.to_csv(directory / COMPARISON_FILE, index=False, float_format="%.17g")
@@ -170,17 +155,8 @@ def build_comparison(config: Config) -> tuple[pd.DataFrame, dict[str, Any]]:
         }
         for record in records
     }
-    baselines = ("hstu", SHALLOW_BASELINE, MEAN_POOL_ABLATION) if config.schema_version >= 3 else (SHALLOW_BASELINE, MEAN_POOL_ABLATION)
+    baselines = ("wukong", "hstu")
     deltas = build_deltas(metrics_by_model, PRIMARY_MODEL, baselines)
-    write_json(
-        directory / DELTAS_FILE,
-        {
-            "created_at": current_timestamp(),
-            "reference": PRIMARY_MODEL,
-            "baselines": list(baselines),
-            "deltas": deltas,
-        },
-    )
 
     summary = {
         "created_at": current_timestamp(),
@@ -190,14 +166,11 @@ def build_comparison(config: Config) -> tuple[pd.DataFrame, dict[str, Any]]:
         "deltas": deltas,
         "rows": records,
     }
-    if config.schema_version >= 3:
-        id_rows = [{"model": record["model"], **group, "notes": "; ".join(group["notes"])} for record in records for group in record["id_groups"]]
-        pd.DataFrame(id_rows).to_csv(directory / "id-groups.csv", index=False, float_format="%.17g")
-        context = read_json(config.run_directory(PRIMARY_MODEL) / "config.json")
-        summary["data_statistics"] = context["data_context"]["split_statistics"]
-        summary["config"] = config.snapshot()
-        if config.data.uses_official_history:
-            summary["history_protocol"] = context["data_context"]["history_conditions"]
-            summary["official_history"] = context["data_context"]["official_history"]
+    id_rows = [{"model": record["model"], **group, "notes": "; ".join(group["notes"])} for record in records for group in record["id_groups"]]
+    pd.DataFrame(id_rows).to_csv(directory / "id-groups.csv", index=False, float_format="%.17g")
+    context = read_json(config.run_directory(PRIMARY_MODEL) / "config.json")
+    summary["data_statistics"] = context["data_context"]["split_statistics"]
+    summary["config"] = config.snapshot()
+    summary["history_protocol"] = context["data_context"]["history_conditions"]
     write_json(directory / SUMMARY_FILE, summary)
     return frame, summary

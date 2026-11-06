@@ -10,9 +10,6 @@ build/
 dist/
 /data/
 /outputs/
-/references/
-/agent.md
-/docs/task.md
 *.pdf
 *.pt
 *.pth

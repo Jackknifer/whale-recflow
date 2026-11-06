@@ -19,4 +19,7 @@ data/official_history.py 连接原始曝光恢复时间，并执行本项目的�
 公开的 results/ 为本项目计算的分组与整体统计，保留数据来源署名。
 原始数据、加工记录、成员索引、逐条预测和训练权重由使用者在本地管理。
 
-WHALE、Wukong、HSTU 和 RecFlow 的论文作者及引用见 docs/research.md。
+模型论文：
+WHALE: https://arxiv.org/abs/2607.17017v2
+Wukong: https://proceedings.mlr.press/v235/zhang24ao.html
+HSTU: https://proceedings.mlr.press/v235/zhai24a.html

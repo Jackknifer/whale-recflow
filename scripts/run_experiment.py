@@ -13,29 +13,20 @@ PHASES = ("check", "train")
 
 
 def parse_arguments(argv: list[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="RecFlow 上的集中必要检查与五项正式训练")
-    parser.add_argument("--config", required=True, type=Path, help="配置文件路径")
+    parser = argparse.ArgumentParser(description="RecFlow 上的必要检查与三模型正式训练")
+    parser.add_argument("--config", default=Path("configs/official.yaml"), type=Path, help="配置文件路径")
     parser.add_argument(
         "--phase",
         required=True,
         choices=PHASES,
-        help="check 执行必要检查，train 执行五项正式训练",
+        help="check 执行必要检查，train 执行三模型正式训练",
     )
     parser.add_argument(
         "--resume",
         action="store_true",
         help="按已完成的 Epoch 恢复训练，只在明确需要恢复时使用",
     )
-    parser.add_argument(
-        "--hourly-rate",
-        type=float,
-        default=None,
-        help="实际实例的每小时单价，用于费用估算",
-    )
-    arguments = parser.parse_args(argv)
-    if arguments.phase == "check" and arguments.hourly_rate is None:
-        parser.error("check 阶段需要 --hourly-rate，填写实际实例每小时单价")
-    return arguments
+    return parser.parse_args(argv)
 
 
 def main(argv: list[str]) -> int:
@@ -48,27 +39,14 @@ def main(argv: list[str]) -> int:
     reader = BatchReader(processed)
     with Stopwatch() as stopwatch:
         if arguments.phase == "check":
-            results = run_checks(
-                config, reader, device, hourly_rate=arguments.hourly_rate
-            )
-            estimate = results["estimate"]
+            results = run_checks(config, reader, device)
             print(f"检查记录保存至 {config.checks_directory()}")
-            print(
-                f"Batch Size {estimate['batch_size']}，"
-                f"Epoch 上限 {estimate['epochs']}，"
-                f"单价 {estimate['hourly_rate_cny']:.2f} 元/小时"
-            )
-            for name, entry in estimate["models"].items():
+            for name, entry in results["models"].items():
+                speed = entry["training_speed"]
                 print(
-                    f"{name}: 满 {estimate['epochs']} 轮计算时间 "
-                    f"{entry['training_hours']:.4f} 小时，"
-                    f"峰值显存 {entry['peak_memory_gib']:.2f} GiB"
+                    f"{name}: 训练速度 {speed['samples_per_second']:.2f} 样本/秒，"
+                    f"峰值显存 {speed['peak_memory_gib']:.2f} GiB"
                 )
-            print(
-                f"五种模型合计计算时间 {estimate['total_training_hours']:.4f} 小时，"
-                f"含开销 {estimate['total_hours_with_overhead']:.4f} 小时，"
-                f"估算费用 {estimate['estimated_cost_cny']:.2f} 元"
-            )
         else:
             records = run_all_models(config, reader, device, resume=arguments.resume)
             for record in records:

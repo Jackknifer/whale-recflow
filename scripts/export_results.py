@@ -10,7 +10,7 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="从已保存指标导出整体比较表、时长分组表与模型差值"
     )
-    parser.add_argument("--config", required=True, type=Path, help="配置文件路径")
+    parser.add_argument("--config", default=Path("configs/official.yaml"), type=Path, help="配置文件路径")
     return parser.parse_args(argv)
 
 

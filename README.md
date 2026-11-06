@@ -1,98 +1,50 @@
 # WHALE-RecFlow
 
-[论文](https://arxiv.org/abs/2607.17017v2) · [方法](docs/research.md) · [实验](docs/experiment.md) · [结果](results/recflow)
+基于 PyTorch，在 RecFlow 上复现 [WHALE: A Scalable Unified Model for Recommendation with Wukong-HSTU Architecture](https://arxiv.org/abs/2607.17017v2) 的逐层 Wukong、HSTU 和 Attention Fusion 结构，同时比较 Wukong-only 和 HSTU-only。
 
-基于 PyTorch，在 RecFlow 上独立复现 WHALE 的逐层融合结构。
-研究特征交互与历史序列的联合建模，包含五模型比较、训练恢复和分组评价。
+## 数据与训练
 
-## 复现范围
+使用 [RecFlow](https://github.com/RecFlow-ICLR/RecFlow) 的 `realshow` 数据，日期为 2024-01-13 至 2024-02-18。
+预测发布的 `long_view` 标签，历史采用作者提供的最多 50 条有效观看，保留请求时间严格早于目标的记录。
 
-| 项目 | 设置 |
+| 设置 | 取值 |
 | --- | --- |
-| 数据 | RecFlow `realshow` |
-| 监督目标 | 发布的业务反馈 `long_view` |
-| 训练、验证、测试 | 3,000,000 / 100,000 / 200,000 |
-| Embedding 维度、层数 | 64 / 2 |
-| 历史来源、上限 | 作者 `seq_effective_50_dict` / 50 条有效观看 |
-| 训练轮数、种子 | 1 / 42 |
+| 训练／验证／测试样本 | 3,000,000／100,000／200,000 |
+| Embedding／模型层数 | 64 维／2 层 |
+| Batch Size／训练轮数／种子 | 256／1／42 |
+| 优化器／学习率／weight decay | AdamW／0.001／0.00001 |
+| 损失／梯度范数上限 | BCEWithLogitsLoss／1.0 |
+| 训练 ID 遮盖概率 | 5% |
+| 环境 | Python 3.13、PyTorch 2.13、CUDA、FP32 |
 
-本项目评价公开数据、小规模条件下的结构表现。原论文的工业数据和规模扩展结论另有实验条件。
-`long_view` 使用数据集的业务定义，不能直接解释为严格完播。
+完整配置见 [configs/official.yaml](configs/official.yaml)。
 
-当前入口为版本 4 作者历史协议。已完成的版本 3 实验使用 128 条曝光历史，结果独立保留。
-版本 4 的完整五模型指标需要重新训练取得。
+## 结果
 
-## 已完成实验
+单轮实验在 RTX 4090 上完成，三模型使用相同测试成员。
 
-以下结果来自版本 3 的 [configs/paper.yaml](configs/paper.yaml)，历史规则见[实验报告](docs/experiment.md)。
-
-| 模型 | 测试 AUC ↑ | 测试 LogLoss ↓ | 测试 NE ↓ |
+| 模型 | AUC ↑ | LogLoss ↓ | NE ↓ |
 | --- | ---: | ---: | ---: |
-| Wukong | 0.727525 | 0.477824 | 0.892913 |
-| HSTU | 0.756088 | 0.462144 | 0.863612 |
-| Shallow-hybrid | 0.754102 | 0.463354 | 0.865872 |
-| **WHALE** | **0.757566** | **0.459887** | **0.859394** |
-| WHALE MeanPool | 0.754784 | 0.462278 | 0.863863 |
+| Wukong | 0.727188 | 0.477716 | 0.892711 |
+| HSTU | 0.733265 | 0.474901 | 0.887451 |
+| WHALE | 0.729998 | 0.478255 | 0.893718 |
 
-五模型使用相同测试成员。此次运行中，WHALE 相对 HSTU 的 AUC 增加 0.001478，NE 相对降低 0.4884%。
-NE 表示归一化交叉熵，定义与分组结果见[实验报告](docs/experiment.md)。
+单轮及最多三轮的验证选权结果保存在 [results/comparison.csv](results/comparison.csv)，实验信息见 [results/experiment.json](results/experiment.json)。
+结果来自单个种子的公开数据离线实验，论文的工业规模结论需要相应实验条件。
 
-## 模型
+## 运行
 
-| 标识符 | 说明 |
-| --- | --- |
-| `wukong` | 用户、候选与上下文的特征交互 |
-| `hstu` | 交替输入历史物品与反馈，在候选位置预测 |
-| `shallow_hybrid` | 历史摘要输入 Wukong |
-| `whale` | 每层结合 Wukong、HSTU 和 Attention Fusion |
-| `whale_mean_pool` | 用历史均值替代 Attention 读取 |
-
-版本 4 的 HSTU 最多处理 101 个 Token，其余历史分支最多处理 50 个 Token。
-比较采用相同历史行为数量，各模型计算量分别报告。
-
-## 复现入口
-
-配置见 [configs/official.yaml](configs/official.yaml)，依赖版本由 [uv.lock](uv.lock) 固定。
-正式训练使用 Python 3.13、CUDA 和 FP32。已有版本 3 运行环境为 RTX 5090 32 GB。
-从 [RecFlow 官方仓库](https://github.com/RecFlow-ICLR/RecFlow)取得 37 个 `realshow` 日文件，放入 `data/raw/RecFlow/`。
-日期范围为 2024-01-13 至 2024-02-18，文件扩展名为 `.feather`。
-作者历史压缩包放在 `data/raw/RecFlow/seq_effective_50_dict.tar.gz`。
-程序直接读取压缩包内的日字典。`pickle` 输入应来自可信的作者数据来源。
-
-<details>
-<summary>最小运行流程</summary>
+将 37 个 `.feather` 日文件和 `seq_effective_50_dict.tar.gz` 放入 `data/raw/RecFlow/`。
+数据、权重和运行输出由本机管理，通过 `.gitignore` 排除。
 
 ```bash
-mkdir -p .work/runtime .work/uv-cache
-export TMPDIR="$PWD/.work/runtime" UV_CACHE_DIR="$PWD/.work/uv-cache"
-uv sync --frozen --no-dev
-uv run python scripts/prepare_data.py --config configs/official.yaml --baseline-config configs/local.yaml
-uv run python scripts/run_experiment.py --config configs/official.yaml --phase check --hourly-rate "${HOURLY_RATE:?请设置实际每小时价格}"
-uv run python scripts/run_experiment.py --config configs/official.yaml --phase train
-uv run python scripts/export_results.py --config configs/official.yaml
-uv run python scripts/export_public_results.py --config configs/official.yaml
+mkdir -p .work/runtime
+export TMPDIR="$PWD/.work/runtime"
+uv sync --frozen
+uv run python scripts/prepare_data.py
+uv run python scripts/run_experiment.py --phase check
+uv run python scripts/run_experiment.py --phase train
+uv run python scripts/export_results.py
 ```
 
-`HOURLY_RATE` 为使用者设置的实际每小时价格，单位为人民币。
-加工数据保存至 `data/processed/recflow-official/`，训练输出保存至 `outputs/official/`。
-公开导出保存至 `results/recflow-official/`，已有结果位于 `results/recflow/`。
-目标抽样复用既有规则，三个集合的成员保持一致。
-完整参数见各脚本的 `--help`，公开汇总导出入口为 [export_public_results.py](scripts/export_public_results.py)。
-
-</details>
-
-## 研究限制
-
-- 单个种子，测试成员曾用于早期实验；结论限定于当前配置。
-- 作者历史经过严格请求时间过滤，真实反馈回传时刻仍然未知。
-- 作者历史仅含有效观看，历史输入不包含最终 `long_view`。
-- 两套协议的历史数量、行为类型和词表不同，指标需要分别报告。
-- 模型计算量不同，长序列扩展和跨种子稳定性尚未验证。
-
-## 引用与许可
-
-使用本项目时，请引用 [CITATION.cff](CITATION.cff) 和[原模型与数据论文](docs/research.md#参考文献)。
-源码与文档采用 [Apache-2.0](LICENSE)，RecFlow 汇总结果采用 [CC BY-SA 4.0](LICENSES/CC-BY-SA-4.0.txt)。
-数据、逐条预测、权重和论文 PDF 由使用者在本地管理。第三方署名见 [NOTICE](NOTICE)。
-
-代码与文档使用 AI 辅助编写和复核。模型与数据贡献归属于原作者。
+源码采用 [Apache-2.0](LICENSE)，RecFlow 结果采用 [CC BY-SA 4.0](LICENSES/CC-BY-SA-4.0.txt)。第三方署名见 [NOTICE](NOTICE)。
