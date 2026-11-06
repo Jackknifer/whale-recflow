@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "WHALE 复现：RecFlow long_view 预测"
 readme = "README.md"
 license = "Apache-2.0"
-license-files = ["LICENSE", "NOTICE"]
+license-files = ["LICENSE", "README.md", "LICENSES/CC-BY-SA-4.0.txt"]
 authors = [{name = "Jackknifer"}]
 keywords = ["recommendation", "WHALE", "RecFlow", "PyTorch", "reproduction"]
 requires-python = ">=3.13,<3.14"
@@ -27,8 +27,8 @@ packages = ["src"]
 [tool.hatch.build.targets.sdist]
 include = [
     "src", "scripts", "configs", "results", "LICENSES",
-    "README.md", "LICENSE", "NOTICE",
-    "pyproject.toml", "uv.lock", ".python-version",
+    "README.md", "LICENSE",
+    "pyproject.toml", "uv.lock",
     ".gitignore", ".gitattributes", ".github",
 ]
 

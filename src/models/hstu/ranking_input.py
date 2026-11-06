@@ -1,4 +1,4 @@
-# 交替输入和时间约定参考 HSTU，RecFlow 适配及来源见 NOTICE。
+# 交替输入和时间约定参考 HSTU，RecFlow 适配及来源见 README.md。
 from dataclasses import dataclass
 
 import torch

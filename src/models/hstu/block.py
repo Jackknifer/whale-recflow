@@ -1,4 +1,4 @@
-# HSTU 计算约定参考 Meta 的 Apache-2.0 实现，来源和版权见 NOTICE。
+# HSTU 计算约定参考 Meta 的 Apache-2.0 实现，来源和版权见 README.md。
 import torch
 import torch.nn.functional as F
 from torch import nn

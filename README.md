@@ -47,4 +47,10 @@ uv run python scripts/run_experiment.py --phase train
 uv run python scripts/export_results.py
 ```
 
-源码采用 [Apache-2.0](LICENSE)，RecFlow 结果采用 [CC BY-SA 4.0](LICENSES/CC-BY-SA-4.0.txt)。第三方署名见 [NOTICE](NOTICE)。
+源码采用 [Apache-2.0](LICENSE)，Copyright 2026 Jackknifer。
+
+HSTU 参考 [Meta generative-recommenders](https://github.com/meta-recsys/generative-recommenders)（Apache-2.0）。
+原始版权声明：Copyright (c) Meta Platforms, Inc. and affiliates.
+本项目调整了 RecFlow 输入、时间计算和历史过滤。
+
+RecFlow 由 Qi Liu 等作者发布，数据及本项目实验汇总采用 [CC BY-SA 4.0](LICENSES/CC-BY-SA-4.0.txt)。

@@ -1,8 +1,1 @@
 * text=auto eol=lf
-*.py text
-*.md text
-*.yaml text
-*.yml text
-*.toml text
-*.json text
-*.csv text
