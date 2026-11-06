@@ -32,25 +32,10 @@
 单轮及最多三轮的验证选权结果保存在 [results/comparison.csv](results/comparison.csv)，实验信息见 [results/experiment.json](results/experiment.json)。
 结果来自单个种子的公开数据离线实验，论文的工业规模结论需要相应实验条件。
 
-## 运行
-
-将 37 个 `.feather` 日文件和 `seq_effective_50_dict.tar.gz` 放入 `data/raw/RecFlow/`。
-数据、权重和运行输出由本机管理，通过 `.gitignore` 排除。
-
-```bash
-mkdir -p .work/runtime
-export TMPDIR="$PWD/.work/runtime"
-uv sync --frozen
-uv run python scripts/prepare_data.py
-uv run python scripts/run_experiment.py --phase check
-uv run python scripts/run_experiment.py --phase train
-uv run python scripts/export_results.py
-```
-
 源码采用 [Apache-2.0](LICENSE)，Copyright 2026 Jackknifer。
 
 HSTU 参考 [Meta generative-recommenders](https://github.com/meta-recsys/generative-recommenders)（Apache-2.0）。
 原始版权声明：Copyright (c) Meta Platforms, Inc. and affiliates.
 本项目调整了 RecFlow 输入、时间计算和历史过滤。
 
-RecFlow 由 Qi Liu 等作者发布，数据及本项目实验汇总采用 [CC BY-SA 4.0](LICENSES/CC-BY-SA-4.0.txt)。
+RecFlow 由 Qi Liu 等作者发布，数据及本项目实验汇总采用 [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/legalcode.en)。
