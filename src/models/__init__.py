@@ -1,20 +1,24 @@
+from .base import BaseModel
 from .embedding import InputEmbedding, VocabularySizes
-from .factory import MODEL_NAMES, BaseModel, build_model
-from .fusion import FusionBlock
+from .factory import MODEL_NAMES, build_model
 from .head import PredictionHead
-from .hstu import HSTUBlock, HSTUStack
-from .wukong import WukongBlock, WukongStack
+from .hstu import HSTUBlock, HSTUModel, HSTUStack
+from .whale import FusionBlock, WhaleModel
+from .wukong import WukongBlock, WukongModel, WukongStack
 
 __all__ = [
     "BaseModel",
     "FusionBlock",
     "HSTUBlock",
+    "HSTUModel",
     "HSTUStack",
     "InputEmbedding",
     "MODEL_NAMES",
     "PredictionHead",
     "VocabularySizes",
+    "WhaleModel",
     "WukongBlock",
+    "WukongModel",
     "WukongStack",
     "build_model",
 ]

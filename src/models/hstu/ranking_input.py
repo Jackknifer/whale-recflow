@@ -4,8 +4,8 @@ from dataclasses import dataclass
 import torch
 from torch import nn
 
-from ..config import ModelConfig
-from .embedding import InputEmbedding
+from ...config import ModelConfig
+from ..embedding import InputEmbedding
 
 
 @dataclass(frozen=True)

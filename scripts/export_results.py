@@ -2,8 +2,8 @@ import argparse
 import sys
 from pathlib import Path
 
-from whale_reproduction.config import load_config
-from whale_reproduction.training.reporting import build_comparison
+from src.config import load_config
+from src.training.reporting import build_comparison
 
 
 def parse_arguments(argv: list[str]) -> argparse.Namespace:

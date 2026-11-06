@@ -3,7 +3,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-from ..config import ModelConfig
+from ...config import ModelConfig
 
 class HSTUBlock(nn.Module):
     def __init__(self, config: ModelConfig, max_history_length: int) -> None:

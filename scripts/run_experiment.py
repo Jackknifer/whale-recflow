@@ -2,12 +2,12 @@ import argparse
 import sys
 from pathlib import Path
 
-from whale_reproduction.config import load_config
-from whale_reproduction.data.batch import BatchReader
-from whale_reproduction.data.store import load_processed
-from whale_reproduction.training.checks import run_checks
-from whale_reproduction.training.experiment import run_all_models
-from whale_reproduction.utils import Stopwatch, format_seconds, resolve_device
+from src.config import load_config
+from src.data.batch import BatchReader
+from src.data.store import load_processed
+from src.training.checks import run_checks
+from src.training.experiment import run_all_models
+from src.utils import Stopwatch, format_seconds, resolve_device
 
 PHASES = ("check", "train")
 

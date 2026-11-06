@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 
 import yaml
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _field(mapping: dict[str, Any], key: str) -> Any:

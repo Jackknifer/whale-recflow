@@ -2,9 +2,9 @@ import argparse
 import sys
 from pathlib import Path
 
-from whale_reproduction.config import load_config
-from whale_reproduction.data.prepare import prepare
-from whale_reproduction.utils import Stopwatch, format_seconds
+from src.config import load_config
+from src.data.prepare import prepare
+from src.utils import Stopwatch, format_seconds
 
 
 def parse_arguments(argv: list[str]) -> argparse.Namespace:

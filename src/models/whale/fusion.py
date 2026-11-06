@@ -2,7 +2,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-from ..config import ModelConfig
+from ...config import ModelConfig
 
 class FusionBlock(nn.Module):
     def __init__(self, config: ModelConfig) -> None:

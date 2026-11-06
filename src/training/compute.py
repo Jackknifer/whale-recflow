@@ -3,8 +3,8 @@ from typing import Any
 import torch
 from torch import nn
 
-from ..models.fusion import FusionBlock
 from ..models.hstu import HSTUBlock
+from ..models.whale import FusionBlock
 from ..models.wukong import WukongBlock
 
 

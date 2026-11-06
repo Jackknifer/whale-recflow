@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 
-from ..config import ModelConfig
+from ...config import ModelConfig
 
 
 class WukongBlock(nn.Module):
