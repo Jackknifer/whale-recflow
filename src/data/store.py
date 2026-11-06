@@ -19,6 +19,7 @@ from .raw import (
 )
 from .vocabulary import Vocabulary
 
+# Parquet 保存曝光和请求表，NumPy 文件保存词表及可直接索引的数组。
 EXPOSURE_FILE = "exposure.parquet"
 REQUEST_FILE = "requests.parquet"
 VOCABULARY_FILE = "vocabulary.npz"
@@ -60,6 +61,7 @@ REQUEST_COLUMNS = (
 
 @dataclass(frozen=True)
 class ProcessedData:
+    # 历史按请求保存，history_target_positions 将目标位置映射到历史行。
     exposure: ExposureTable
     request_index: RequestIndex
     vocabulary: Vocabulary
@@ -78,6 +80,7 @@ class ProcessedData:
 
 
 def _exposure_from_frame(frame: pd.DataFrame) -> ExposureTable:
+    # 读取后恢复各字段的约定类型，保持与原始数据加载结果一致。
     missing = [name for name in EXPOSURE_COLUMNS if name not in frame.columns]
     if missing:
         raise ValueError(f"曝光文件缺少字段 {missing}")
@@ -175,6 +178,7 @@ def save_processed(
     history_requests: dict[str, np.ndarray],
     history_target_positions: dict[str, np.ndarray],
 ) -> Path:
+    # 同时保存预处理参数、目标成员和请求历史，使后续训练复用同一份输入。
     root = config.processed_directory()
     root.mkdir(parents=True, exist_ok=True)
     _exposure_frame(exposure).to_parquet(root / EXPOSURE_FILE, index=False)
@@ -216,6 +220,7 @@ def save_processed(
 
 
 def load_processed(config: Config) -> ProcessedData:
+    # 读取前检查加工规则，加载后验证数组形状、请求映射和历史条件。
     root = config.processed_directory()
     required = (
         EXPOSURE_FILE,
@@ -275,6 +280,7 @@ def load_processed(config: Config) -> ProcessedData:
         feedback_offset=int(rules["feedback_offset"]),
     )
     numerical = NumericalParameters.from_json(payload["numerical"])
+    # 目标和历史数组以只读内存映射加载，批次构造时再读取所需部分。
     target_rows = {
         split: np.load(root / TARGET_DIRECTORY / f"{split}.npy", mmap_mode="r")
         for split in SPLIT_NAMES
@@ -314,6 +320,7 @@ def load_processed(config: Config) -> ProcessedData:
             raise ValueError(f"数据集合 {split} 的历史长度数量与请求数量不一致")
         if mapping.shape != rows.shape or np.any(mapping < 0) or np.any(mapping >= requests.size):
             raise ValueError(f"数据集合 {split} 的目标与历史请求映射无效")
+        # 保存的历史请求必须与每个目标所属请求逐条一致。
         if not np.array_equal(requests[mapping], exposure.request_id[rows]):
             raise ValueError(f"数据集合 {split} 的历史请求与目标请求不一致")
         audit = metadata["official_history_audit"]

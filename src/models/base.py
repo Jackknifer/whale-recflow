@@ -5,6 +5,7 @@ from ..config import ModelConfig
 from .embedding import InputEmbedding, VocabularySizes
 
 
+# 共用输入编码和输出形状约定，具体模型实现各自的 forward。
 class BaseModel(nn.Module):
     def __init__(
         self,
@@ -35,6 +36,7 @@ class BaseModel(nn.Module):
         return self._embedding(batch)
 
     def _flatten_nonsequence(self, nonsequence: torch.Tensor) -> torch.Tensor:
+        # 保留批次维度，将非序列 Token 连接为预测头的输入。
         return nonsequence.reshape(nonsequence.size(0), -1)
 
     @property

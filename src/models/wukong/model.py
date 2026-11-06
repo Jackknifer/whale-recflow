@@ -7,6 +7,7 @@ from ..head import PredictionHead
 from .block import WukongStack
 
 
+# Wukong-only 使用当前请求的非序列特征完成预测。
 class WukongModel(BaseModel):
     def __init__(
         self,

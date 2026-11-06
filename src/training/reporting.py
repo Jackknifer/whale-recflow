@@ -12,6 +12,7 @@ COMPARISON_FILE = "comparison.csv"
 DURATION_FILE = "duration-groups.csv"
 SUMMARY_FILE = "summary.json"
 PRIMARY_MODEL = "whale"
+# 固定导出列顺序，使不同运行生成的结果文件保持一致格式。
 COMPARISON_COLUMNS = (
     "model",
     "auc",
@@ -49,6 +50,7 @@ def _record_path(config: Config, model_name: str) -> Path:
 
 
 def collect_records(config: Config) -> list[dict[str, Any]]:
+    # 三个模型需使用相同配置、预处理参数和完整目标成员，才能进入比较表。
     records: list[dict[str, Any]] = []
     reference_context = None
     reference_indices = None
@@ -72,6 +74,7 @@ def collect_records(config: Config) -> list[dict[str, Any]]:
             reference_context = context["data_context"]
         elif reference_context != context["data_context"]:
             raise ValueError("比较模型的数据来源或预处理参数不一致")
+        # 比较完整行索引及事件编号，同时检查成员数量和顺序。
         with np.load(path.parent / "target_indices.npz", allow_pickle=False) as indices:
             if reference_indices is None:
                 reference_indices = {name: indices[name].copy() for name in indices.files}
@@ -109,6 +112,7 @@ def collect_records(config: Config) -> list[dict[str, Any]]:
 
 
 def build_duration_frame(records: list[dict[str, Any]]) -> pd.DataFrame:
+    # 将每个模型的时长分组展开为独立行，并保留无法计算指标的原因。
     rows: list[dict[str, Any]] = []
     for record in records:
         for group in record["duration_groups"]:
@@ -133,6 +137,7 @@ def build_duration_frame(records: list[dict[str, Any]]) -> pd.DataFrame:
 
 
 def build_comparison(config: Config) -> tuple[pd.DataFrame, dict[str, Any]]:
+    # 核验运行记录后，统一导出整体、时长、自然 UNK 分组和实验摘要。
     records = collect_records(config)
     frame = pd.DataFrame(records)[list(COMPARISON_COLUMNS)]
     frame["matrix_forward_flops_per_sample"] = [record["compute"]["matrix_forward_flops_per_sample"] for record in records]
@@ -140,6 +145,7 @@ def build_comparison(config: Config) -> tuple[pd.DataFrame, dict[str, Any]]:
     frame["max_sequence_tokens"] = [record["compute"]["max_sequence_tokens"] for record in records]
     directory = config.results_directory()
     ensure_directory(directory)
+    # 使用 17 位有效数字保存 float64 结果，减少文件往返引入的精度损失。
     frame.to_csv(directory / COMPARISON_FILE, index=False, float_format="%.17g")
 
     duration_frame = build_duration_frame(records)

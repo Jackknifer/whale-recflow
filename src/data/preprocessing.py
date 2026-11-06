@@ -5,6 +5,7 @@ import numpy as np
 DAY_MS = 86_400_000
 SHANGHAI_OFFSET_MS = 8 * 3600 * 1000
 
+# 仅对时长和年龄的对数特征执行标准化，周期特征与缺失标记保留原值。
 STANDARDIZED_FEATURES = ("log_video_duration", "log_video_age_days")
 NUMERICAL_FEATURE_ORDER = (
     "log_video_duration",
@@ -24,6 +25,7 @@ MISSING_PARTNERS = {
 
 @dataclass(frozen=True)
 class NumericalParameters:
+    # 参数由训练目标拟合，随后用于训练、验证和测试目标。
     fill_values: dict[str, float]
     means: dict[str, float]
     stds: dict[str, float]
@@ -49,6 +51,7 @@ class NumericalParameters:
 
 
 def numerical_group_slices(config) -> tuple[slice, ...]:
+    # 数值数组按固定顺序保存，通过分组切片提供给独立的 Tokenizer。
     slices: list[slice] = []
     position = 0
     for group in config.data.numerical_groups:
@@ -68,10 +71,12 @@ def local_day_index(time_ms: np.ndarray) -> np.ndarray:
 
 
 def request_time_features(time_ms: np.ndarray) -> tuple[np.ndarray, ...]:
+    # 使用上海本地时间生成小时和星期周期，保留周期首尾的连续性。
     local = time_ms + SHANGHAI_OFFSET_MS
     milliseconds_of_day = local % DAY_MS
     hour = milliseconds_of_day.astype(np.float64) / 3_600_000.0
     day_index = local // DAY_MS
+    # 1970-01-01 为星期四，星期编号从星期一的 0 开始。
     weekday = ((day_index + 3) % 7).astype(np.float64)
     hour_angle = 2.0 * np.pi * hour / 24.0
     weekday_angle = 2.0 * np.pi * weekday / 7.0
@@ -91,6 +96,7 @@ def video_age_features(
     request_timestamp: np.ndarray,
     upload_timestamp: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray]:
+    # 无效或晚于请求的上传时间使用缺失标记，并暂时将年龄设为零。
     missing = (upload_timestamp <= 0) | (upload_timestamp > request_timestamp)
     safe_upload = np.where(missing, request_timestamp, upload_timestamp)
     delta = (request_timestamp - safe_upload).astype(np.float64)
@@ -105,6 +111,7 @@ def raw_numerical_values(
 ) -> dict[str, np.ndarray]:
     duration_missing = duration_missing_mask(duration_ms)
     safe_duration = np.where(duration_missing, 0, duration_ms).astype(np.float64)
+    # 时长转换为秒后取 log1p；视频年龄以天为单位取 log1p。
     log_duration = np.log1p(np.maximum(safe_duration, 0.0) / 1000.0)
     hour_sin, hour_cos, weekday_sin, weekday_cos = request_time_features(
         request_timestamp
@@ -124,6 +131,7 @@ def raw_numerical_values(
 
 
 def fit_numerical_parameters(values: dict[str, np.ndarray]) -> NumericalParameters:
+    # 缺失值使用有效训练观测的均值填充，再计算填充后的总体均值和标准差。
     fill_values: dict[str, float] = {}
     means: dict[str, float] = {}
     stds: dict[str, float] = {}
@@ -162,6 +170,7 @@ def _fill_missing(
 def apply_numerical_parameters(
     values: dict[str, np.ndarray], parameters: NumericalParameters
 ) -> np.ndarray:
+    # 复用训练参数处理输入，标准差为零时只执行中心化。
     filled = _fill_missing(values, parameters.fill_values)
     columns = []
     for feature in NUMERICAL_FEATURE_ORDER:
@@ -178,5 +187,6 @@ def apply_numerical_parameters(
 def history_age_seconds(
     target_time_ms: np.ndarray, history_time_ms: np.ndarray
 ) -> np.ndarray:
+    # 相对时间以秒为单位取 log1p，结果作为每条历史的单个数值特征。
     delta = target_time_ms[:, None] - history_time_ms
     return np.log1p(np.maximum(delta, 0).astype(np.float64) / 1000.0).astype(np.float32)

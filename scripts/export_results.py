@@ -1,3 +1,4 @@
+# 结果导出命令入口，汇总整体指标、分组指标及模型之间的差值。
 import argparse
 import sys
 from pathlib import Path
@@ -17,6 +18,7 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str]) -> int:
     arguments = parse_arguments(argv)
     config = load_config(arguments.config)
+    # 汇总过程统一核验配置与目标成员，入口只负责展示结果。
     frame, summary = build_comparison(config)
     print("整体指标")
     print(frame.to_string(index=False))

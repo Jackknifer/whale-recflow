@@ -5,10 +5,12 @@ import pandas as pd
 from sklearn.metrics import log_loss, roc_auc_score
 
 DURATION_MISSING_GROUP = "missing"
+# all_positive 表示视频时长大于零的全部样本。
 DURATION_ALL_POSITIVE_GROUP = "all_positive"
 
 
 def sigmoid(values: np.ndarray) -> np.ndarray:
+    # 分别计算正值和负值的等价公式，避免指数计算溢出。
     result = np.empty_like(values, dtype=np.float64)
     positive = values >= 0
     result[positive] = 1.0 / (1.0 + np.exp(-values[positive]))
@@ -36,6 +38,7 @@ def _ne(logloss: float, positive_rate: float) -> float | None:
 def group_metrics(
     labels: np.ndarray, logits: np.ndarray, name: str, lower, upper
 ) -> dict[str, Any]:
+    # 分组可能为空或只含一个类别，保留可定义的指标并记录原因。
     count = int(labels.size)
     positive = int(labels.sum())
     positive_rate = float(labels.mean()) if count else None
@@ -70,6 +73,7 @@ def duration_groups(
     logits: np.ndarray,
     duration_ms: np.ndarray,
 ) -> list[dict[str, Any]]:
+    # 原始时长以毫秒保存，分组阈值以秒配置，区间采用 (lower, upper]。
     seconds = duration_ms.astype(np.float64) / 1000.0
     missing = duration_ms <= 0
     groups: list[dict[str, Any]] = []
@@ -100,6 +104,7 @@ def duration_groups(
 
 
 def relative_improvement(baseline: float | None, current: float | None) -> float | None:
+    # 面向数值越小越好的指标，改善比例以对比模型的数值为分母。
     if baseline is None or current is None:
         return None
     if baseline == 0.0:
@@ -108,6 +113,7 @@ def relative_improvement(baseline: float | None, current: float | None) -> float
 
 
 def id_groups(labels: np.ndarray, logits: np.ndarray, video_unknown: np.ndarray, author_unknown: np.ndarray) -> list[dict[str, Any]]:
+    # 根据训练词表产生的自然 UNK 分组，测试阶段不会额外遮盖 ID。
     groups = []
     for field, unknown in (("video", video_unknown), ("author", author_unknown)):
         if unknown.dtype != np.bool_ or unknown.shape != labels.shape:
@@ -125,6 +131,7 @@ def build_deltas(
     reference: str = "whale",
     baselines: tuple[str, ...] = ("wukong", "hstu"),
 ) -> dict[str, Any]:
+    # 绝对差统一使用参照模型减去对比模型，损失下降比例另行计算。
     if reference not in records:
         raise KeyError(f"差值计算缺少参照模型 {reference}")
     reference_metrics = records[reference]

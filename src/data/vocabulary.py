@@ -9,12 +9,14 @@ from .raw import (
     ExposureTable,
 )
 
+# 反馈编码依次保留 PAD=0、UNK=1，以及原始二值反馈对应的 2 和 3。
 FEEDBACK_TABLE_SIZE = 4
 HISTORY_FIT_CHUNK = 8192
 
 
 @dataclass(frozen=True)
 class Vocabulary:
+    # 原始类别按升序保存，实际编码从 code_offset 开始。
     sizes: dict[str, int]
     raw_values: dict[str, np.ndarray]
     feedback_sizes: dict[str, int]
@@ -38,6 +40,7 @@ class Vocabulary:
         }
 
     def encode(self, field: str, raw: np.ndarray) -> np.ndarray:
+        # 验证和测试中的新类别统一编码为 UNK，词表不会随输入扩展。
         table = self.raw_values[field]
         position = np.searchsorted(table, raw)
         clipped = np.clip(position, 0, table.size - 1)
@@ -78,6 +81,7 @@ def fit_vocabulary(
         raise ValueError(f"历史反馈编码的增加值固定为 2，配置为 {feedback_offset}")
     offset = unknown_index + 1
 
+    # 只收集训练目标实际引用的历史曝光，PAD 的 -1 索引不参与拟合。
     used_history = np.zeros(exposure.size, dtype=bool)
     for start in range(0, train_history_rows.shape[0], HISTORY_FIT_CHUNK):
         chunk = train_history_rows[start : start + HISTORY_FIT_CHUNK]
@@ -87,6 +91,7 @@ def fit_vocabulary(
     raw_values: dict[str, np.ndarray] = {}
     for field in config.data.categorical_fields:
         target_values = exposure.categorical(field)[train_rows].astype(np.int64)
+        # 视频字段合并训练目标和其历史，用户字段仅使用训练目标。
         if field in config.data.history_video_fields:
             history_values = exposure.categorical(field)[used_history_rows].astype(np.int64)
             raw_values[field] = _unique_join([target_values, history_values])

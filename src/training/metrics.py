@@ -6,6 +6,7 @@ from sklearn.metrics import log_loss, roc_auc_score
 
 @dataclass(frozen=True)
 class Metrics:
+    # 指标与评估成员数量一起保存，便于检查不同结果的比较条件。
     auc: float
     logloss: float
     ne: float
@@ -27,6 +28,7 @@ class Metrics:
 def compute_metrics(
     logits: np.ndarray, labels: np.ndarray, probability_dtype: str, single_class_policy: str
 ) -> Metrics:
+    # 整体评估要求完整的二分类样本，先验证输入和概率计算精度。
     if logits.ndim != 1 or labels.ndim != 1:
         raise ValueError(f"指标计算需要一维输入，实际形状为 {logits.shape} 与 {labels.shape}")
     if logits.size != labels.size:
@@ -51,6 +53,7 @@ def compute_metrics(
     auc = float(roc_auc_score(labels64, probabilities))
     loss = float(log_loss(labels64, probabilities, labels=[0.0, 1.0], normalize=True))
     positive_rate = float(labels64.mean())
+    # NE 的分母为当前评估集合正例比例对应的二元熵。
     entropy = -(positive_rate * np.log(positive_rate) + (1.0 - positive_rate) * np.log(1.0 - positive_rate))
     if entropy <= 0.0:
         raise ValueError(f"正例比例为 {positive_rate}，参考熵为零，无法计算 NE")
@@ -65,6 +68,7 @@ def compute_metrics(
 
 
 def _sigmoid(values: np.ndarray) -> np.ndarray:
+    # 按正负值分别计算等价公式，保持大幅值 logit 的数值稳定性。
     result = np.empty_like(values, dtype=np.float64)
     positive = values >= 0
     result[positive] = 1.0 / (1.0 + np.exp(-values[positive]))

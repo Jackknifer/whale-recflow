@@ -35,6 +35,7 @@ TARGET_INDICES_FILE = "target_indices.npz"
 
 
 def verify_run_context(config: Config, reader: BatchReader, model_name: str) -> dict[str, Any]:
+    # 配置、预处理参数和完整目标成员共同标识一次实验。
     directory = config.run_directory(model_name)
     context = read_json(directory / CONFIG_RECORD_FILE)
     if context["model"] != model_name or context["config"] != config.snapshot():
@@ -48,6 +49,7 @@ def verify_run_context(config: Config, reader: BatchReader, model_name: str) -> 
 def load_model_for_evaluation(
     config: Config, model_name: str, reader: BatchReader, device: torch.device, best_epoch: int
 ):
+    # 按验证阶段选择的轮次加载 state_dict，再由评估过程切换到 eval 模式。
     weights = best_epoch_path(config.run_directory(model_name), best_epoch)
     if not weights.is_file():
         raise FileNotFoundError(f"最佳权重不存在 {weights}")
@@ -66,6 +68,7 @@ def run_final_test(
     run_directory = config.run_directory(model_name)
     prediction_path = run_directory / FINAL_TEST_PREDICTIONS
     rows = reader.target_rows("test")
+    # 复用已有最终预测前，逐条核验目标标识、标签、时长和自然 UNK 标记。
     if prediction_path.is_file():
         predictions = pd.read_parquet(prediction_path)
         exposure = reader.exposure
@@ -97,6 +100,7 @@ def run_final_test(
     expected = int(reader.target_rows("test").size)
     if logits.size != expected:
         raise ValueError(f"测试集预测数量为 {logits.size}，期望 {expected}")
+    # 整体指标和分组指标均从 logit 重新计算，使用同一组测试成员。
     metrics = compute_metrics(
         logits,
         labels,
@@ -147,6 +151,7 @@ def run_single_model(
     resume: bool,
     check_results: dict[str, Any],
 ) -> dict[str, Any]:
+    # 每个模型使用独立目录，配置和目标成员在开始训练前保存。
     run_directory = config.run_directory(model_name)
     ensure_directory(run_directory)
     record_path = run_directory / RUN_RECORD_FILE
@@ -187,6 +192,7 @@ def run_single_model(
         run_directory,
         resume=_should_resume(run_directory, resume),
     )
+    # 全部训练和验证完成后，使用所选权重执行最终测试。
     test_metrics, test_count, groups, identifiers = run_final_test(
         config, model_name, reader, device, outcome.best_epoch
     )
@@ -239,6 +245,7 @@ def run_single_model(
     shutil.copyfile(best_epoch_path(run_directory, outcome.best_epoch), temporary)
     temporary.replace(best_path)
     write_json(record_path, record)
+    # 完成记录与最佳权重保存后，清理恢复状态和各轮中间权重。
     resume_path = run_directory / RESUME_NAME
     if resume_path.is_file():
         resume_path.unlink()
@@ -252,6 +259,7 @@ def run_single_model(
 def run_all_models(
     config: Config, reader: BatchReader, device: torch.device, resume: bool
 ) -> list[dict[str, Any]]:
+    # 顺序运行全部模型，已完成结果经过配置和成员核验后直接复用。
     if config.experiment.parallel_runs != 1:
         raise ValueError("正式实验要求顺序执行，parallel_runs 必须为 1")
     checks = verify_checks(config, reader, device)

@@ -9,6 +9,7 @@ from ..models.wukong import WukongBlock
 
 
 def forward_compute(model: nn.Module, tensors: dict[str, torch.Tensor], max_history_length: int) -> dict[str, Any]:
+    # 统计实际前向路径的矩阵乘加，每次乘加计为 2 FLOPs。
     counts = {"linear": 0, "wukong_interactions": 0, "hstu_attention": 0, "fusion_attention": 0}
 
     def count_linear(module, inputs, output):
@@ -20,16 +21,19 @@ def forward_compute(model: nn.Module, tensors: dict[str, torch.Tensor], max_hist
         counts["wukong_interactions"] += 2 * batch * module._lcb_tokens * tokens * dim
 
     def count_hstu(module, inputs, output):
+        # _uvqk 是直接矩阵参数，其投影开销需在 nn.Linear 之外单独统计。
         batch, tokens, dim = inputs[0].shape
         projected = module._num_heads * (2 * module._value_dim + 2 * module._attention_dim)
         counts["linear"] += 2 * batch * tokens * dim * projected
         counts["hstu_attention"] += 2 * batch * module._num_heads * tokens * tokens * (module._attention_dim + module._value_dim)
 
     def count_fusion(module, inputs, output):
+        # Attention 只计算有历史的样本，矩阵规模按有效样本数量统计。
         nonsequence, sequence, mask = inputs[:3]
         active = int(mask.any(dim=1).sum())
         counts["fusion_attention"] += 4 * active * nonsequence.size(1) * sequence.size(1) * module._dim
 
+    # Hook 收集实际输入形状，计算完成后移除，结果按样本数量归一化。
     handles = []
     for module in model.modules():
         for kind, hook in ((nn.Linear, count_linear), (WukongBlock, count_wukong), (HSTUBlock, count_hstu), (FusionBlock, count_fusion)):

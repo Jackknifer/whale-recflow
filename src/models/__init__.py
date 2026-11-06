@@ -1,3 +1,4 @@
+# 统一导出三个模型、共用组件和模型构造入口。
 from .base import BaseModel
 from .embedding import InputEmbedding, VocabularySizes
 from .factory import MODEL_NAMES, build_model

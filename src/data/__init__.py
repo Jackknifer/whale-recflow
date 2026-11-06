@@ -1,3 +1,4 @@
+# 统一导出数据读取、预处理、保存和批次构造接口。
 from .batch import Batch, BatchReader
 from .prepare import prepare
 from .preprocessing import NumericalParameters

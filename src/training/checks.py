@@ -25,6 +25,7 @@ from .trainer import (
 )
 from .compute import forward_compute
 
+# CUDA 测速先预热，再使用固定批次数量计时。
 WARMUP_STEPS = 3
 TIMED_STEPS = 8
 EVALUATION_WARMUP_BATCHES = 3
@@ -33,6 +34,7 @@ TARGET_INDICES_FILE = "target_indices.npz"
 
 
 def _representative_batch(config: Config, reader: BatchReader, split: str):
+    # 样本均来自真实目标，优先覆盖存在的空历史、部分历史和满历史情况。
     rows = reader.target_rows(split)
     all_positions = np.arange(rows.size, dtype=np.int64)
     counts = reader.history_counts(split, all_positions)
@@ -48,6 +50,7 @@ def _representative_batch(config: Config, reader: BatchReader, split: str):
 def check_data(
     config: Config, reader: BatchReader, log: LogWriter
 ) -> dict[str, Any]:
+    # 在代表性真实批次上校验历史成员、PAD、时间结构和输入类型。
     exposure = reader.exposure
     positions, batch = _representative_batch(config, reader, "train")
     rows = reader.target_rows("train")[positions]
@@ -157,6 +160,7 @@ def check_training_step(
     device: torch.device,
     log: LogWriter,
 ) -> dict[str, Any]:
+    # 使用正式损失和优化器执行一次完整的前向、反向及参数更新。
     seed_everything(config.seed)
     model = reader.build_model(model_name, config).to(device)
     optimizer = build_optimizer(config, model)
@@ -175,6 +179,7 @@ def check_training_step(
     if not torch.isfinite(loss):
         raise ValueError(f"{model_name} 损失不是有限值")
     loss.backward()
+    # 验证训练 ID 遮盖使 UNK 行获得有限且非零的梯度。
     unknown_gradients = {}
     for field in config.training.id_mask_fields:
         gradient = model._embedding._categorical[field].weight.grad
@@ -187,6 +192,7 @@ def check_training_step(
     )
     if not torch.isfinite(gradient_norm):
         raise ValueError(f"{model_name} 梯度范数不是有限值")
+    # 保存预测头和排序输入中获得梯度的参数，核验优化器实际完成更新。
     snapshot = {
         name: parameter.detach().clone()
         for name, parameter in model.named_parameters()
@@ -237,6 +243,7 @@ def check_training_step(
 
 
 def check_ranking_path(model, tensors: dict[str, torch.Tensor]) -> dict[str, Any]:
+    # 校验候选位置、有效 Token 数量和交替序列的因果条件。
     with torch.no_grad():
         ranking = model._ranking_input(tensors, model._embedding)
     counts = tensors["history_mask"].sum(dim=1)
@@ -257,6 +264,7 @@ def check_ranking_path(model, tensors: dict[str, torch.Tensor]) -> dict[str, Any
     history_time = tensors["history_time_ms"].cpu().numpy()
     target_time = tensors["target_time_ms"].cpu().numpy()
     actual = ranking.time_bucket.cpu().numpy()
+    # 按原始毫秒时间独立重建分桶，核验下一位置时间规则。
     for sample in range(counts.size(0)):
         size = int(counts[sample])
         sequence_time = np.full(length + 1, target_time[sample], dtype=np.int64)
@@ -276,6 +284,7 @@ def _training_step(
     device: torch.device,
     config: Config,
 ) -> None:
+    # 测速步骤与正式训练共用损失、梯度裁剪和优化器设置。
     tensors = batch.as_tensors(device)
     labels = torch.from_numpy(batch.labels).to(device)
     optimizer.zero_grad(set_to_none=True)
@@ -303,6 +312,7 @@ def measure_training_speed(
         raise ValueError("训练集合批次数量不足，无法完成训练测速")
     batches = iter(reader.iter_batches("train", config.training.batch_size, shuffle=True, generator=np.random.Generator(np.random.PCG64(config.seed)), training=True))
     model.train()
+    # 预热后同步 CUDA，计时包含批次构造、传输、反向和优化更新。
     for index in range(WARMUP_STEPS):
         _training_step(model, optimizer, loss_function, next(batches), device, config)
     torch.cuda.synchronize()
@@ -342,6 +352,7 @@ def measure_evaluation_speed(
     if reader.num_batches("validation", config.training.batch_size) < EVALUATION_WARMUP_BATCHES + EVALUATION_TIMED_BATCHES:
         raise ValueError("验证集合批次数量不足，无法完成评估测速")
     batches = iter(reader.iter_batches("validation", config.training.batch_size, shuffle=False, generator=None))
+    # 评估计时关闭梯度，预热和计时边界均同步 CUDA。
     with torch.no_grad():
         for index in range(EVALUATION_WARMUP_BATCHES):
             model(next(batches).as_tensors(device))
@@ -375,6 +386,7 @@ def check_weight_roundtrip(
     log: LogWriter,
     model_name: str = "whale",
 ) -> dict[str, Any]:
+    # 在同一真实验证批次上，比较保存前与重新加载权重后的预测。
     seed_everything(config.seed)
     model = reader.build_model(model_name, config).to(device)
     path = directory / f"{model_name}-{BEST_MODEL_NAME}"
@@ -405,6 +417,7 @@ def check_weight_roundtrip(
 
 
 def estimate_memory(config: Config, reader: BatchReader, model_name: str) -> dict[str, Any]:
+    # 基础估计包含 FP32 权重、梯度和 AdamW 两份状态，未计入激活内存。
     model = reader.build_model(model_name, config)
     total = sum(parameter.numel() for parameter in model.parameters())
     trainable = sum(
@@ -429,6 +442,7 @@ def run_checks(
     reader: BatchReader,
     device: torch.device,
 ) -> dict[str, Any]:
+    # 开始时记录 running，全部模型的检查完成后统一记录 passed。
     directory = config.checks_directory()
     ensure_directory(directory)
     results: dict[str, Any] = {
@@ -471,6 +485,7 @@ def run_checks(
 
 
 def verify_checks(config: Config, reader: BatchReader, device: torch.device) -> dict[str, Any]:
+    # 正式训练前核验检查状态、配置、目标成员及关键运行环境。
     directory = config.checks_directory()
     results = read_json(directory / "check.json")
     if results.get("schema_version") != config.schema_version or results.get("status") != "passed":

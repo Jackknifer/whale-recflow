@@ -10,6 +10,7 @@ from ..embedding import InputEmbedding
 
 @dataclass(frozen=True)
 class RankingBatch:
+    # candidate_positions 为每个样本的候选 Token 位置，形状为 [B]。
     tokens: torch.Tensor
     mask: torch.Tensor
     time_bucket: torch.Tensor
@@ -17,12 +18,14 @@ class RankingBatch:
     candidate_positions: torch.Tensor
 
 
+# 将历史物品与行为交替排列，并在有效历史末尾插入当前候选。
 class RankingInput(nn.Module):
     def __init__(self, config: ModelConfig, max_history_length: int, item_fields: int, action_fields: int) -> None:
         super().__init__()
         if config.hstu.ranking_time_alignment != "next_event":
             raise ValueError("交替排序输入要求 next_event 时间方式")
         self._max_history_length = max_history_length
+        # 每条历史占两个位置，另保留一个候选位置。
         self.max_tokens = 2 * max_history_length + 1
         self._buckets = config.hstu.relative_time_buckets
         self._divisor = config.hstu.relative_time_log_divisor
@@ -40,6 +43,7 @@ class RankingInput(nn.Module):
         if length != self._max_history_length:
             raise ValueError("排序输入的历史长度与配置不一致")
         counts = history_mask.sum(dim=1)
+        # 历史左侧连续排列；空历史样本的候选位于位置 0。
         candidate_positions = counts * 2
         indices = torch.arange(self.max_tokens, device=history_mask.device)
         if not torch.equal(history_mask, indices[:length].unsqueeze(0) < counts.unsqueeze(1)):
@@ -48,6 +52,7 @@ class RankingInput(nn.Module):
         items = self._item(item_values)
         actions = self._action(action_values)
         candidates = self._candidate(candidate_values)
+        # 偶数位置放物品，奇数位置放反馈，候选之后的全部位置为 PAD。
         tokens = items.new_zeros((batch_size, self.max_tokens, items.size(-1)))
         tokens[:, :2 * length:2] = items
         tokens[:, 1:2 * length:2] = actions
@@ -58,8 +63,10 @@ class RankingInput(nn.Module):
 
         time = torch.cat((history_time.repeat_interleave(2, dim=1), target_time.unsqueeze(1)), dim=1)
         time = torch.where(indices.unsqueeze(0) >= candidate_positions.unsqueeze(1), target_time.unsqueeze(1), time)
+        # 时间查表使用 |t[r+1] - t[c]|，末尾补充候选时间，单位为毫秒。
         extended = torch.cat((time, target_time.unsqueeze(1)), dim=1)
         difference = extended[:, 1:, None] - time[:, None, :]
+        # 非负对数结果转换为整数，再限制到时间表的有效索引范围。
         bucket = (torch.log(difference.abs().clamp(min=1).to(torch.float64)) / self._divisor).to(torch.long)
         bucket = bucket.clamp(min=0, max=self._buckets)
         row = indices[:, None]
@@ -68,6 +75,7 @@ class RankingInput(nn.Module):
         same_event = (column // 2) == (row // 2)
         earlier = time[:, None, :] < time[:, :, None]
         candidate_row = row.unsqueeze(0) == candidate_positions[:, None, None]
+        # 同时限制有效位置、Token 顺序和请求时间，候选行读取全部有效历史。
         causal = valid[:, :, None] & valid[:, None, :] & ordered.unsqueeze(0)
         causal = causal & (same_event.unsqueeze(0) | earlier | candidate_row)
         return RankingBatch(tokens, valid, bucket, causal, candidate_positions)

@@ -4,6 +4,7 @@ from torch import nn
 from ...config import ModelConfig
 
 
+# 使用 FMB 特征交互和 LCB 线性组合，更新非序列 Token。
 class WukongBlock(nn.Module):
     def __init__(self, config: ModelConfig, input_tokens: int) -> None:
         super().__init__()
@@ -29,6 +30,7 @@ class WukongBlock(nn.Module):
         self._fmb_mlp = nn.Sequential(*layers)
         self._lcb_weight = nn.Parameter(torch.empty(self._lcb_tokens, input_tokens))
         nn.init.xavier_uniform_(self._lcb_weight)
+        # Token 数量发生变化时，残差分支也沿 Token 维度执行投影。
         if input_tokens == config.nonsequence_tokens:
             self._residual: nn.Module | None = None
         else:
@@ -47,9 +49,11 @@ class WukongBlock(nn.Module):
             raise ValueError(
                 f"WukongBlock 期望 {self._input_tokens} 个 Token，实际为 {token_count}"
             )
+        # tokens 为 [B, N, D]，Gram 矩阵包含 N×N 个两两内积。
         gram = tokens @ tokens.transpose(1, 2)
         flattened = self._gram_norm(gram.reshape(batch_size, token_count * token_count))
         fmb = self._fmb_mlp(flattened).reshape(batch_size, self._fmb_tokens, dim)
+        # LCB 仅沿 Token 维度组合输入，保留每个 Embedding 的维度。
         lcb = torch.einsum("ij,bjd->bid", self._lcb_weight, tokens)
         combined = torch.cat([fmb, lcb], dim=1)
         if self._residual is None:
@@ -59,6 +63,7 @@ class WukongBlock(nn.Module):
         return self._layer_norm_output(combined + residual)
 
 
+# 首层转换输入 Token 数量，后续层保持配置的非序列 Token 数量。
 class WukongStack(nn.Module):
     def __init__(self, config: ModelConfig, first_input_tokens: int) -> None:
         super().__init__()

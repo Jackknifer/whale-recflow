@@ -21,6 +21,7 @@ from ..utils import (
 from .evaluate import collect_logits
 from .metrics import Metrics, compute_metrics
 
+# 最佳权重用于最终评估，resume.pt 保存完整的轮次恢复状态。
 BEST_MODEL_NAME = "best_model.pt"
 RESUME_NAME = "resume.pt"
 LOG_NAME = "train.log"
@@ -33,6 +34,7 @@ def best_epoch_path(directory: Path, epoch: int) -> Path:
 
 @dataclass(frozen=True)
 class EpochResult:
+    # 每轮保存训练统计、完整验证指标和选权结果，供恢复训练时继续使用。
     epoch: int
     train_loss: float
     train_steps: int
@@ -70,6 +72,7 @@ class EpochResult:
 
 @dataclass(frozen=True)
 class TrainingOutcome:
+    # 汇总训练完成状态，最终测试由实验流程使用所选权重单独执行。
     model_name: str
     best_epoch: int
     best_validation: Metrics
@@ -81,6 +84,7 @@ class TrainingOutcome:
     peak_memory_bytes: int
 
 
+# 日志按追加方式保存并立即刷新，恢复训练时保留已有记录。
 class LogWriter:
     def __init__(self, path: Path, echo: bool = False) -> None:
         ensure_directory(path.parent)
@@ -116,6 +120,7 @@ def metrics_from_json(payload: dict[str, Any]) -> Metrics:
 
 
 def parameter_report(model: nn.Module) -> dict[str, int]:
+    # 分别统计全部参数、Embedding 参数和允许训练的参数。
     embedding = sum(
         module.weight.numel()
         for module in model.modules()
@@ -159,6 +164,7 @@ def _train_epoch(
     log: LogWriter,
     epoch: int,
 ) -> tuple[float, int, float]:
+    # 每轮使用真实训练批次，批次读取时应用日内随机顺序和 ID 遮盖。
     model.train()
     total_loss = 0.0
     total_samples = 0
@@ -176,10 +182,12 @@ def _train_epoch(
         if not torch.isfinite(loss):
             raise ValueError(f"Epoch {epoch} 第 {steps + 1} 步出现非有限损失")
         loss.backward()
+        # 非有限损失或梯度立即终止训练，有限梯度按配置范数裁剪。
         torch.nn.utils.clip_grad_norm_(
             model.parameters(), config.training.gradient_clip_norm, error_if_nonfinite=True
         )
         optimizer.step()
+        # 按实际样本数量累计损失，使最后一个不足整批的批次获得正确权重。
         total_loss += float(loss.detach()) * batch.size
         total_samples += batch.size
         steps += 1
@@ -198,6 +206,7 @@ def run_training(
     run_directory: Path,
     resume: bool,
 ) -> TrainingOutcome:
+    # 训练只使用训练集和验证集，测试评估在本流程结束后执行。
     ensure_directory(run_directory)
     seed_everything(config.seed)
     model = reader.build_model(model_name, config).to(device)
@@ -222,10 +231,12 @@ def run_training(
         if not resume_path.is_file():
             raise FileNotFoundError(f"恢复文件不存在 {resume_path}")
         state = torch.load(resume_path, map_location="cpu", weights_only=False)
+        # 先核验配置和目标成员，再恢复模型、优化器及全部随机数状态。
         verify_resume_state(config, state, reader, model_name)
         model.load_state_dict(state["model"])
         optimizer.load_state_dict(state["optimizer"])
         restore_rng_states(state["rng"])
+        # 检查点在完整轮次结束时生成，恢复从下一轮开始。
         start_epoch = int(state["next_epoch"])
         best_logloss = float(state["best_logloss"])
         best_epoch = int(state["best_epoch"])
@@ -270,12 +281,14 @@ def run_training(
             validation_seconds = time.perf_counter() - validation_started
 
             previous_best = best_logloss
+            # 验证 LogLoss 严格减小时保存权重，相等时保留较早轮次。
             selected = validation.logloss < previous_best
             if selected:
                 best_logloss = validation.logloss
                 best_epoch = epoch
                 best_validation = validation
                 save_checkpoint(model.state_dict(), best_epoch_path(run_directory, epoch))
+            # min_delta 控制早停计数，权重选择仍采用严格最小验证损失。
             improvement = previous_best - validation.logloss
             if improvement > config.training.early_stopping_min_delta:
                 stale_epochs = 0
@@ -302,6 +315,7 @@ def run_training(
                 f"验证 LogLoss {validation.logloss:.6f} AUC {validation.auc:.6f} "
                 f"NE {validation.ne:.6f} 选择 {selected} 停止计数 {stale_epochs}"
             )
+            # 保存当前轮的完整状态后，再检查是否触发 Early Stopping。
             save_resume_state(
                 config,
                 model_name,
@@ -359,6 +373,7 @@ def save_resume_state(
     previous_peak_memory_bytes: int,
     device: torch.device,
 ) -> None:
+    # 除优化状态外，保存完整目标成员和数据设置，保证恢复时逐条核验。
     payload = {
         "schema_version": STATE_SCHEMA_VERSION,
         "model_name": model_name,
@@ -401,6 +416,7 @@ def save_resume_state(
 def verify_resume_state(
     config: Config, state: dict[str, Any], reader: BatchReader, model_name: str
 ) -> None:
+    # 任一实验设置或目标成员发生变化，都需使用独立的运行目录。
     if int(state.get("schema_version", -1)) != STATE_SCHEMA_VERSION:
         raise ValueError("恢复文件的版本与当前实现不一致")
     if state["config"] != config.snapshot():

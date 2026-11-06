@@ -8,6 +8,7 @@ from .block import HSTUStack
 from .ranking_input import RankingInput
 
 
+# HSTU-only 编码交替序列，使用当前候选位置的表示完成预测。
 class HSTUModel(BaseModel):
     def __init__(
         self,
@@ -40,5 +41,6 @@ class HSTUModel(BaseModel):
         encoded = self._stack(
             ranking.tokens, ranking.mask, ranking.time_bucket, ranking.causal_mask
         )
+        # 每个样本的历史长度不同，需分别读取对应候选位置。
         rows = torch.arange(encoded.size(0), device=encoded.device)
         return self._head(encoded[rows, ranking.candidate_positions])

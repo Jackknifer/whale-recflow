@@ -4,6 +4,7 @@ from torch import nn
 from ..config import ModelConfig
 
 
+# 每条目标输出一个 logit，sigmoid 和概率指标由评估过程计算。
 class PredictionHead(nn.Module):
     def __init__(self, config: ModelConfig, input_dim: int) -> None:
         super().__init__()

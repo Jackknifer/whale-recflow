@@ -4,6 +4,7 @@ from torch import nn
 
 from ...config import ModelConfig
 
+# 非序列 Token 查询历史表示，聚合结果经过连接投影和 SwiGLU 残差更新。
 class FusionBlock(nn.Module):
     def __init__(self, config: ModelConfig) -> None:
         super().__init__()
@@ -38,6 +39,7 @@ class FusionBlock(nn.Module):
         sequence: torch.Tensor,
         history_mask: torch.Tensor,
     ) -> torch.Tensor:
+        # 仅对存在历史的样本计算 softmax，空历史样本的聚合结果保持零。
         present = history_mask.any(dim=1)
         output = torch.zeros_like(nonsequence)
         if not present.any():
@@ -46,6 +48,7 @@ class FusionBlock(nn.Module):
         query = self._query(self._query_norm(nonsequence[present]))
         key = self._key(self._sequence_norm(selected_sequence))
         value = self.project_value(selected_sequence)
+        # 得分形状为 [B_active, N, L]，每个非序列 Token 独立聚合历史。
         scores = query @ key.transpose(1, 2) / self._dim**0.5
         mask = history_mask[present].unsqueeze(1)
         scores = scores.masked_fill(~mask, float("-inf"))
@@ -56,6 +59,7 @@ class FusionBlock(nn.Module):
     def fuse(self, nonsequence: torch.Tensor, attended: torch.Tensor) -> torch.Tensor:
         concatenated = torch.cat([nonsequence, attended], dim=-1)
         fused = nonsequence + self._fusion_projection(concatenated)
+        # 融合投影和 SwiGLU 分别使用残差连接。
         normalized = self._ffn_norm(fused)
         gated = F.silu(self._gate(normalized)) * self._up(normalized)
         return fused + self._down(gated)

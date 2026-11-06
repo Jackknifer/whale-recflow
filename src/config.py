@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 
 import yaml
 
+# 所有项目路径以源码所在仓库为基准，保持从不同目录启动时的路径一致。
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -16,6 +17,7 @@ def _field(mapping: dict[str, Any], key: str) -> Any:
 
 
 def _expect(mapping: dict[str, Any], key: str, expected: Any) -> Any:
+    # 固定实验约定在加载配置时检查，错误直接报告到具体字段。
     value = _field(mapping, key)
     if value != expected:
         raise ValueError(f"配置字段 {key} 的值为 {value!r}，当前实现要求 {expected!r}")
@@ -30,6 +32,7 @@ def _as_tuple(mapping: dict[str, Any], key: str) -> tuple[str, ...]:
 
 
 def _snapshot(value: Any) -> Any:
+    # 将 Path 和 tuple 转换为 JSON 可保存的基础类型。
     if isinstance(value, Path):
         return str(value)
     if isinstance(value, dict):
@@ -42,6 +45,7 @@ def _snapshot(value: Any) -> Any:
 
 
 def parse_time_ms(text: str, timezone_name: str) -> int:
+    # 配置时间必须包含显式时区，统一转换为 UTC 毫秒时间戳。
     moment = datetime.fromisoformat(text)
     if moment.tzinfo is None:
         raise ValueError(f"时间字符串 {text} 缺少时区")
@@ -52,6 +56,7 @@ def parse_time_ms(text: str, timezone_name: str) -> int:
 
 @dataclass(frozen=True)
 class DataConfig:
+    # 各特征列表的顺序决定预处理结果和模型输入的排列。
     name: str
     raw_root: Path
     processed_root: Path
@@ -84,6 +89,7 @@ class DataConfig:
     extension_seed: tuple[int, ...]
 
     def time_bounds_ms(self) -> dict[str, tuple[int, int]]:
+        # 每组时间范围均采用 [start, end)，相邻集合共享边界。
         bounds = {
             "train": (self.train_start, self.validation_start),
             "validation": (self.validation_start, self.test_start),
@@ -95,6 +101,7 @@ class DataConfig:
         }
 
     def file_dates(self) -> tuple[str, ...]:
+        # 原始日文件包含起止日期，数量必须与配置一致。
         start = datetime.strptime(self.file_start_date, "%Y-%m-%d").date()
         end = datetime.strptime(self.file_end_date, "%Y-%m-%d").date()
         if end < start:
@@ -120,6 +127,7 @@ class WukongConfig:
 
 @dataclass(frozen=True)
 class HSTUConfig:
+    # 历史编码和交替排序输入分别声明时间计算方式，共用时间分桶设置。
     num_heads: int
     attention_dim_per_head: int
     value_dim_per_head: int
@@ -152,6 +160,7 @@ class HeadConfig:
 
 @dataclass(frozen=True)
 class ModelConfig:
+    # 三个模型共用输入维度；各计算模块使用自己的参数设置。
     name: str
     embedding_dim: int
     layer_norm_eps: float
@@ -168,6 +177,7 @@ class ModelConfig:
 
 @dataclass(frozen=True)
 class TrainingConfig:
+    # 同时记录优化过程、验证选权、样本顺序和训练 ID 遮盖规则。
     batch_size: int
     max_epochs: int
     optimizer: str
@@ -190,6 +200,7 @@ class TrainingConfig:
 
 @dataclass(frozen=True)
 class EvaluationConfig:
+    # 测试策略与训练轮数共同决定最终使用的权重。
     metrics: tuple[str, ...]
     probability_dtype: str
     single_class_policy: str
@@ -217,6 +228,7 @@ class ExperimentConfig:
 
 @dataclass(frozen=True)
 class Config:
+    # 聚合各部分配置，并集中生成运行、数据和结果路径。
     path: Path
     schema_version: int
     project: str
@@ -248,12 +260,14 @@ class Config:
         return PROJECT_ROOT / self.data.raw_root
 
     def preprocessing_snapshot(self) -> dict[str, Any]:
+        # 排除可迁移的数据目录，仅记录格式版本、数据规则和种子。
         data = self.snapshot()["data"]
         del data["raw_root"]
         del data["processed_root"]
         return {"schema_version": self.schema_version, "seed": self.seed, "data": data}
 
     def snapshot(self) -> dict[str, Any]:
+        # 保存完整实验设置，同时排除本机配置文件路径。
         result = asdict(self)
         del result["path"]
         result["data"]["file_names"] = self.data.file_names()
@@ -261,6 +275,7 @@ class Config:
 
 
 def _load_data_config(section: dict[str, Any]) -> DataConfig:
+    # 检查完整字段集合，防止多余字段或拼写错误被忽略。
     files = _field(section, "files")
     groups = _field(section, "numerical_groups")
     if not isinstance(groups, list) or not all(isinstance(group, list) for group in groups):
@@ -352,6 +367,7 @@ def _load_model_config(section: dict[str, Any]) -> ModelConfig:
 
 
 def load_config(path: str | Path = "configs/official.yaml") -> Config:
+    # 加载配置后统一验证实验规模、模型输入顺序和评估规则。
     config_path = PROJECT_ROOT / path
     with config_path.open(encoding="utf-8") as handle:
         raw = yaml.safe_load(handle)
@@ -423,6 +439,7 @@ def load_config(path: str | Path = "configs/official.yaml") -> Config:
         raise ValueError("历史上限或抽样种子与正式设置不一致")
     if config.training.batch_size != 256 or config.training.max_epochs not in (1, 3):
         raise ValueError("正式实验的 Batch Size 为 256，训练轮数为 1 或 3")
+    # 单轮训练直接评估该轮权重，多轮训练评估验证集选出的权重。
     policy = "final_epoch_only" if config.training.max_epochs == 1 else "selected_checkpoint_only"
     if config.evaluation.final_test_policy != policy:
         raise ValueError("最终测试策略与训练轮数不一致")

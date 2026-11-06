@@ -13,6 +13,7 @@ from .raw import ExposureTable, RequestIndex
 OFFICIAL_LENGTH = 50
 OFFICIAL_COLUMNS = 10
 CHUNK_SIZE = 2048
+# 作者历史数组中的列索引，顺序取自 RecFlow 的原始历史定义。
 VIDEO_COLUMNS = {
     "video_id": 0,
     "author_id": 1,
@@ -22,6 +23,7 @@ VIDEO_COLUMNS = {
 }
 
 
+# 使用请求与视频的组合键，将作者历史连接到原始曝光行。
 class ExposureLookup:
     def __init__(self, exposure: ExposureTable) -> None:
         if np.any(exposure.request_id < 0) or np.any(exposure.video_id < 0):
@@ -31,6 +33,7 @@ class ExposureLookup:
             raise ValueError("请求与视频组合键超出 int64 范围")
         self.max_request = int(exposure.request_id.max())
         self.max_video = int(exposure.video_id.max())
+        # 先校验组合键的整数范围，再通过位移构造无冲突的 int64 键。
         keys = (exposure.request_id << self.video_bits) | exposure.video_id.astype(np.int64)
         order = np.argsort(keys, kind="stable")
         keys = keys[order]
@@ -40,6 +43,7 @@ class ExposureLookup:
             values = getattr(exposure, field)
             if np.any(values[left] != values[right]):
                 raise ValueError(f"同一请求和视频对应不同的 {field}，无法唯一恢复作者历史")
+        # 重复组合所需字段一致时保留首条曝光，形成唯一的历史查找表。
         starts = np.concatenate(([0], np.flatnonzero(keys[1:] != keys[:-1]) + 1))
         self.keys = keys[starts]
         self.rows = order[starts].astype(np.int32)
@@ -67,6 +71,7 @@ def verify_official_history_rows(
     counts: np.ndarray,
     audit: dict[str, int],
 ) -> None:
+    # 加载加工数据时重新验证来源统计、PAD、用户归属和严格时间条件。
     if requests.dtype != np.int64 or np.any(np.diff(requests) <= 0):
         raise ValueError("作者历史请求索引需要唯一且升序的 int64 编号")
     if counts.dtype != np.int32 or np.any((counts < 0) | (counts > OFFICIAL_LENGTH)):
@@ -117,6 +122,7 @@ def _gather_chunk(
         raise ValueError(f"作者历史数组需要整数类型及形状 {expected_shape}，实际为 {arrays.shape}、{arrays.dtype}")
     if np.any(arrays[:, :, 7] < 0):
         raise ValueError("作者历史请求时间出现负值")
+    # 列索引 7 为秒级请求时间，9 为 request_id；先连接曝光恢复毫秒时间。
     valid = arrays[:, :, 7] > 0
     rows = np.full(valid.shape, -1, dtype=np.int32)
     rows[valid] = lookup.find(arrays[:, :, 9][valid], arrays[:, :, 0][valid])
@@ -131,6 +137,7 @@ def _gather_chunk(
         raise ValueError("作者历史包含其他用户的记录")
     if np.any(valid & (exposure.effective_view[safe] != 1)):
         raise ValueError("作者有效观看历史包含 effective_view 非 1 的记录")
+    # 历史成员沿用作者选择，再排除同一请求及时间不早于目标的记录。
     same_request = valid & (arrays[:, :, 9] == target_requests[:, None])
     nonpast = valid & (history_time >= target_times[:, None])
     keep = valid & ~same_request & ~nonpast
@@ -167,6 +174,7 @@ def read_official_histories(
         raise ValueError("作者历史需要 50 条上限及原始请求时间")
     started = time.perf_counter()
     lookup = ExposureLookup(exposure)
+    # 每个目标请求保存一份最多 50 条历史，空余位置使用 -1。
     histories = {split: np.full((ids.size, OFFICIAL_LENGTH), -1, dtype=np.int32) for split, ids in history_requests.items()}
     counts = {split: np.zeros(ids.size, dtype=np.int32) for split, ids in history_requests.items()}
     positions = {split: request_index.positions(ids) for split, ids in history_requests.items()}
@@ -181,6 +189,7 @@ def read_official_histories(
     seen_dates: set[str] = set()
     daily_records: list[dict[str, Any]] = []
     # 仅加载使用者从 RecFlow 作者来源取得的 pickle 文件。
+    # 顺序读取压缩包中的日字典，每天处理完成后释放字典内存。
     with tarfile.open(path, mode="r|gz", bufsize=64 * 1024) as archive:
         for member in archive:
             if not member.isfile() or not member.name.endswith(".pkl"):
@@ -223,6 +232,7 @@ def read_official_histories(
             seen_dates.add(day)
             del payload
             print(f"作者历史 {day} 已核验，累计 {len(seen_dates)}/{len(expected_dates)} 天", flush=True)
+    # 全部日期和正式请求均需得到覆盖，才能将来源记录标记为完整。
     if seen_dates != expected_dates:
         raise ValueError(f"作者历史缺少日期：{sorted(expected_dates - seen_dates)}")
     totals: dict[str, dict[str, int]] = {}

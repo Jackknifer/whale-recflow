@@ -25,6 +25,7 @@ HISTORY_CHUNK = 8192
 def _host_memory() -> dict[str, int]:
     import resource
 
+    # macOS 返回字节，Linux 返回 KiB，统一记录为字节。
     usage = resource.getrusage(resource.RUSAGE_SELF)
     return {
         "peak_rss_bytes": int(usage.ru_maxrss) * (1 if sys.platform == "darwin" else 1024),
@@ -34,6 +35,7 @@ def _host_memory() -> dict[str, int]:
 def numerical_inputs(
     exposure: ExposureTable, rows: np.ndarray
 ) -> dict[str, np.ndarray]:
+    # 只读取当前目标行，供训练数值参数拟合及后续统计使用。
     return raw_numerical_values(
         exposure.duration[rows],
         exposure.request_timestamp[rows],
@@ -51,6 +53,7 @@ def history_statistics(
     feedback_fields: tuple[str, ...] = ("effective_view",),
 ) -> dict[str, Any]:
     lengths = history_counts[target_positions].astype(np.int64)
+    # 同一请求可能包含多个目标，历史统计按其被目标引用的次数加权。
     weights = np.bincount(target_positions, minlength=history_counts.size)
     feedback_positive = {field: 0 for field in feedback_fields}
     total_positions = 0
@@ -88,6 +91,7 @@ def history_statistics(
 def unknown_ratios(
     vocabulary, exposure: ExposureTable, rows: np.ndarray
 ) -> dict[str, float]:
+    # 统计目标中的 UNK 比例，用于描述训练词表对各集合的覆盖情况。
     ratios: dict[str, float] = {}
     for field in vocabulary.raw_values:
         encoded = vocabulary.encode(field, exposure.categorical(field)[rows])
@@ -96,6 +100,7 @@ def unknown_ratios(
 
 
 def prepare(config: Config) -> dict[str, Any]:
+    # 加工目录需为空，完成后保存三个模型共同使用的数据和来源统计。
     directory = config.processed_directory()
     if directory.exists() and any(directory.iterdir()):
         raise FileExistsError(f"加工目录已有内容，不能覆盖已有数据：{directory}")
@@ -107,6 +112,7 @@ def prepare(config: Config) -> dict[str, Any]:
     target_rows = sample_targets(exposure, config, candidates)
     history_requests: dict[str, np.ndarray] = {}
     history_target_positions: dict[str, np.ndarray] = {}
+    # 按请求共用历史，通过 inverse 将每个目标映射回对应请求。
     for split in SPLIT_ORDER:
         rows = target_rows[split]
         requests, inverse = np.unique(exposure.request_id[rows], return_inverse=True)
@@ -118,6 +124,7 @@ def prepare(config: Config) -> dict[str, Any]:
 
     train_rows = target_rows["train"]
     train_history = history_rows["train"]
+    # 词表使用训练目标及其历史，数值参数只使用训练目标。
     vocabulary = fit_vocabulary(config, exposure, train_rows, train_history)
     numerical = fit_numerical_parameters(numerical_inputs(exposure, train_rows))
     unknown_masks = {
@@ -190,6 +197,7 @@ def prepare(config: Config) -> dict[str, Any]:
             "different_request": True,
             "request_time_strictly_before": True,
             "availability": config.data.history_availability,
+            # 当前条件验证请求时间，原始数据未确认反馈实际可用时间。
             "feedback_completion_time_verified": False,
             "feedback_fields": list(config.data.history_feedback_fields),
             "effective_view_required": 1,
@@ -221,6 +229,7 @@ def prepare(config: Config) -> dict[str, Any]:
         history_requests,
         history_target_positions,
     )
+    # 全部加工文件生成后，补充实际文件大小和最终耗时。
     sizes = {
         path.name: int(path.stat().st_size)
         for path in sorted(Path(root).rglob("*"))

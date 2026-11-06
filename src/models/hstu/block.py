@@ -5,6 +5,7 @@ from torch import nn
 
 from ...config import ModelConfig
 
+# 执行 UVQK 投影、带相对位置与时间信息的聚合，以及 U 门控残差更新。
 class HSTUBlock(nn.Module):
     def __init__(self, config: ModelConfig, max_history_length: int) -> None:
         super().__init__()
@@ -39,6 +40,7 @@ class HSTUBlock(nn.Module):
         self._time_bias = nn.Parameter(
             torch.empty(self._num_buckets + 1).normal_(mean=0.0, std=0.02)
         )
+        # 行 r 为查询位置、列 c 为键位置，查表索引为 c - r + L - 1。
         indices = torch.arange(max_history_length, dtype=torch.long)
         self.register_buffer(
             "position_index",
@@ -47,6 +49,7 @@ class HSTUBlock(nn.Module):
         )
 
     def relative_bias(self, time_bucket: torch.Tensor) -> torch.Tensor:
+        # 返回 [B, 1, L, L]，同一层的所有 Head 共用位置和时间参数。
         position = self._position_bias[self.position_index].unsqueeze(0).unsqueeze(1)
         time = self._time_bias[time_bucket].unsqueeze(1)
         return position + time
@@ -62,6 +65,7 @@ class HSTUBlock(nn.Module):
             raise ValueError(
                 f"HSTUBlock 期望历史长度为 {self._max_length}，实际为 {length}"
             )
+        # tokens 为 [B, L, D]；一次投影生成门控、数值、查询和键。
         normalized = F.layer_norm(tokens, (dim,), eps=self._eps)
         projected = F.silu(normalized @ self._uvqk)
         split_sizes = [
@@ -78,6 +82,7 @@ class HSTUBlock(nn.Module):
 
         scores = torch.einsum("bihd,bjhd->bhij", q, k)
         scores = scores + self.relative_bias(time_bucket)
+        # 聚合权重使用 SiLU 并除以固定长度，之后应用因果条件。
         scores = F.silu(scores) / self._max_length
         scores = scores * causal_mask.unsqueeze(1).to(scores.dtype)
         aggregated = torch.einsum("bhij,bjhd->bihd", scores, v)
@@ -87,6 +92,7 @@ class HSTUBlock(nn.Module):
         aggregated = F.layer_norm(
             aggregated, (self._num_heads * self._value_dim,), eps=self._eps
         )
+        # 先归一化聚合结果，再通过 U 门控和输出投影更新残差。
         gated = aggregated * u.reshape(
             batch_size, length, self._num_heads * self._value_dim
         )
@@ -99,10 +105,12 @@ class HSTUBlock(nn.Module):
         time_bucket: torch.Tensor,
         causal_mask: torch.Tensor,
     ) -> torch.Tensor:
+        # 每层输出后清除 PAD，保证其不能作为后续层的有效历史。
         output = self(tokens, time_bucket, causal_mask)
         return output * history_mask.unsqueeze(-1).to(output.dtype)
 
 
+# 各层独立维护 HSTU 参数，并在层间保持相同的有效位置条件。
 class HSTUStack(nn.Module):
     def __init__(self, config: ModelConfig, max_history_length: int) -> None:
         super().__init__()

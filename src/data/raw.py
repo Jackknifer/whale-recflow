@@ -12,6 +12,7 @@ SHANGHAI_OFFSET_MS = 8 * 3600 * 1000
 INT32_MAX = 2**31 - 1
 EVENT_ID_FILE_SHIFT = 32
 
+# 类别字段顺序固定，后续词表、批次和模型输入均沿用此顺序。
 CATEGORICAL_FIELDS = (
     "user_id",
     "device_id",
@@ -55,6 +56,7 @@ EXPOSURE_INT8 = ("effective_view", "long_view")
 
 @dataclass(frozen=True)
 class ExposureTable:
+    # 每个数组对应同一批曝光行，保留原始标识、毫秒时间和源文件位置。
     request_id: np.ndarray
     user_id: np.ndarray
     request_timestamp: np.ndarray
@@ -98,6 +100,7 @@ class ExposureTable:
 
 @dataclass(frozen=True)
 class SourceFile:
+    # 原始文件清单用于检查数据完整性，并追溯每条 event_id 的来源。
     index: int
     name: str
     date: str
@@ -106,6 +109,7 @@ class SourceFile:
 
 @dataclass(frozen=True)
 class RequestIndex:
+    # request_ids 严格递增，每个请求对应唯一用户、时间和曝光数量。
     request_ids: np.ndarray
     user_id: np.ndarray
     request_timestamp: np.ndarray
@@ -116,6 +120,7 @@ class RequestIndex:
         return int(self.request_ids.size)
 
     def positions(self, request_ids: np.ndarray) -> np.ndarray:
+        # 返回请求在索引中的位置，未找到的请求使用 -1 表示。
         position = np.searchsorted(self.request_ids, request_ids)
         clipped = np.clip(position, 0, self.request_ids.size - 1)
         found = self.request_ids[clipped] == request_ids
@@ -137,6 +142,7 @@ def _day_index_to_calendar(day_index: np.ndarray) -> np.ndarray:
 
 
 def _read_table(path: Path) -> tuple[list[str], pa.Table]:
+    # 只清除列名两端空白，清理后出现重名时终止读取。
     table = feather.read_table(path, memory_map=True)
     original = [field.name for field in table.schema]
     stripped = [name.strip() for name in original]
@@ -146,6 +152,7 @@ def _read_table(path: Path) -> tuple[list[str], pa.Table]:
 
 
 def _integer_column(table: pa.Table, path: Path, name: str) -> np.ndarray:
+    # 所需原始字段必须为完整整数列，读取时直接校验类型和空值。
     if name not in table.column_names:
         raise KeyError(f"文件 {path} 缺少字段 {name}")
     column = table.column(name)
@@ -157,6 +164,7 @@ def _integer_column(table: pa.Table, path: Path, name: str) -> np.ndarray:
 
 
 def source_row_counts(config: Config) -> list[SourceFile]:
+    # 按配置日期建立稳定的文件顺序，同时统计总量以便预分配数组。
     sources: list[SourceFile] = []
     for file_index, file_name in enumerate(config.data.file_names()):
         path = _require_file(config.raw_directory() / file_name)
@@ -178,6 +186,7 @@ def source_row_counts(config: Config) -> list[SourceFile]:
 
 
 def _validate_file(path: Path, expected_date: str, table: pa.Table) -> None:
+    # 校验本地日期、真实曝光标记、二值标签和整数存储范围。
     timestamp = _integer_column(table, path, "request_timestamp")
     if (timestamp <= 0).any():
         raise ValueError(f"文件 {path} 的 request_timestamp 出现非正值")
@@ -219,6 +228,7 @@ def read_exposure(config: Config) -> tuple[ExposureTable, list[SourceFile]]:
         raise ValueError("原始数据没有记录")
     if total > INT32_MAX:
         raise ValueError("曝光数量超过历史行索引的 int32 范围")
+    # 按原始列的有效范围分配数组，避免逐日连接造成重复内存占用。
     buffer: dict[str, np.ndarray] = {}
     for name in EXPOSURE_INT32:
         buffer[name] = np.zeros(total, dtype=np.int32)
@@ -249,6 +259,7 @@ def read_exposure(config: Config) -> tuple[ExposureTable, list[SourceFile]]:
         rows = np.arange(1, table.num_rows + 1, dtype=np.int64)
         record_index[span] = rows
         file_index_array[span] = source.index
+        # 高 32 位记录文件编号，低 32 位记录从 1 开始的原始行号。
         event_id[span] = (source.index << EVENT_ID_FILE_SHIFT) + rows
         cursor += table.num_rows
         del table
@@ -284,6 +295,7 @@ def read_exposure(config: Config) -> tuple[ExposureTable, list[SourceFile]]:
 
 
 def build_request_index(exposure: ExposureTable) -> RequestIndex:
+    # 一个请求可包含多个候选视频，但全部曝光必须属于同一用户和时间。
     order = np.argsort(exposure.request_id, kind="stable")
     sorted_request = exposure.request_id[order]
     starts_mask = np.zeros(sorted_request.size, dtype=bool)

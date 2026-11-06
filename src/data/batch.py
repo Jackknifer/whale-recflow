@@ -21,6 +21,7 @@ PADDING_INDEX = 0
 
 @dataclass(frozen=True)
 class Batch:
+    # 当前目标形状为 [B, ...]，历史输入为 [B, L, ...]，时间结构为 [B, L, L]。
     categorical: dict[str, np.ndarray]
     duration: np.ndarray
     request_time: np.ndarray
@@ -45,6 +46,7 @@ class Batch:
         return int(self.labels.size)
 
     def as_tensors(self, device) -> dict[str, object]:
+        # 仅转换模型输入，标签与追溯信息由训练和评估过程单独读取。
         import torch
 
         tensors: dict[str, object] = {}
@@ -73,6 +75,7 @@ class Batch:
         return tensors
 
 
+# 使用已保存的词表、数值参数及历史索引，按需构造共用模型输入。
 class BatchReader:
     def __init__(self, processed: ProcessedData) -> None:
         self._data = processed
@@ -97,6 +100,7 @@ class BatchReader:
 
     @property
     def data_context(self) -> dict[str, object]:
+        # 保留影响实验内容的数据设置，排除耗时，供恢复训练时比较。
         result = {
             "preprocessing_config": self._data.metadata["preprocessing_config"],
             "source_files": self._data.metadata["source_files"],
@@ -164,6 +168,7 @@ class BatchReader:
         return self._vocabulary.encode(field, self._exposure.categorical(field)[rows]) == self._vocabulary.unknown_index
 
     def save_target_indices(self, path: Path) -> None:
+        # 同时保存曝光行号和 event_id，确认不同模型使用完全相同的目标。
         values = {}
         for split in ("train", "validation", "test"):
             rows = self.target_rows(split)
@@ -184,6 +189,7 @@ class BatchReader:
                     raise ValueError(f"{split} 完整事件编号与保存的记录不一致")
 
     def history_rows(self, split: str, positions: np.ndarray) -> np.ndarray:
+        # positions 是目标集合中的位置，需经请求映射取得共用历史。
         if split not in self._data.history_rows:
             raise KeyError(f"未知数据集合 {split}")
         requests = self._data.history_target_positions[split][positions]
@@ -208,6 +214,7 @@ class BatchReader:
         training: bool = False,
         epoch: int = 0,
     ) -> Iterator[Batch]:
+        # 所有集合共用批次构造，训练时额外应用样本顺序和 ID 遮盖规则。
         rows = self.target_rows(split)
         total = int(rows.size)
         if total == 0:
@@ -230,6 +237,7 @@ class BatchReader:
             yield self.mask_training_batch(batch, epoch, batch_index) if training else batch
 
     def daily_order(self, epoch: int) -> np.ndarray:
+        # 保留日期先后顺序，按日期编号和轮数生成可重复的日内随机顺序。
         if epoch < 0 or epoch >= self._config.training.max_epochs:
             raise ValueError(f"训练轮数 {epoch} 超出当前配置范围")
         rows = self.target_rows("train")
@@ -246,6 +254,7 @@ class BatchReader:
         return order.astype(np.int64)
 
     def mask_training_batch(self, batch: Batch, epoch: int, batch_index: int) -> Batch:
+        # 独立种子包含轮数和批次编号，使三个模型使用相同的 ID 遮盖。
         training = self._config.training
         if training.id_mask_probability == 0.0:
             return batch
@@ -254,6 +263,7 @@ class BatchReader:
         ]))
         categorical = dict(batch.categorical)
         history_video = dict(batch.history_video)
+        # 只遮盖已知 ID，PAD 和现有 UNK 保持原值。
         for field in training.id_mask_fields:
             values = categorical[field]
             chosen = generator.random(values.shape, dtype=np.float32) < training.id_mask_probability
@@ -291,6 +301,7 @@ class BatchReader:
             exposure.upload_timestamp[rows],
         )
         applied = apply_numerical_parameters(numerical, self._numerical)
+        # 使用安全行号完成向量化读取，再将全部无效历史转换为 PAD。
         valid = history_slot >= 0
         safe = np.maximum(history_slot, 0)
         history_video = {}
@@ -307,6 +318,7 @@ class BatchReader:
             history_feedback[field] = np.where(valid, encoded, PADDING_INDEX).astype(
                 np.int64
             )
+        # 历史时间保留毫秒精度，另生成相对目标时间的 log1p 秒数特征。
         history_time = np.where(valid, exposure.request_timestamp[safe], 0)
         target_time = exposure.request_timestamp[rows]
         age = history_age_seconds(target_time, history_time)
@@ -340,15 +352,18 @@ class BatchReader:
     def _temporal_structures(
         self, history_mask: np.ndarray, history_time: np.ndarray
     ) -> tuple[np.ndarray, np.ndarray]:
+        # WHALE 的历史 HSTU 使用当前查询与键事件之间的毫秒时间差。
         row_time = history_time[:, :, None]
         column_time = history_time[:, None, :]
         difference = np.abs(row_time - column_time).astype(np.float64)
         magnitude = np.log(np.maximum(difference, 1.0)) / TIME_LOG_DIVISOR
+        # 时间索引为 floor(log(max(|Δt|, 1)) / 0.301)，限制在 0～128。
         time_bucket = np.clip(np.floor(magnitude), 0, MAX_TIME_BUCKET).astype(np.int64)
         row_valid = history_mask[:, :, None]
         column_valid = history_mask[:, None, :]
         diagonal = np.arange(self._max_length)[None, :, None] == np.arange(
             self._max_length
         )[None, None, :]
+        # 每个有效位置可读取自身及请求时间严格更早的历史。
         causal_mask = row_valid & column_valid & ((column_time < row_time) | diagonal)
         return time_bucket, causal_mask

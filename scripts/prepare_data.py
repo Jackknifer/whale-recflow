@@ -1,3 +1,4 @@
+# 数据准备命令入口，生成三个模型共用的加工数据和来源统计。
 import argparse
 import sys
 from pathlib import Path
@@ -16,6 +17,7 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str]) -> int:
     arguments = parse_arguments(argv)
     config = load_config(arguments.config)
+    # 数据生成和校验由 prepare 统一完成，入口负责参数和结果展示。
     with Stopwatch() as stopwatch:
         metadata = prepare(config)
     root = config.processed_directory()

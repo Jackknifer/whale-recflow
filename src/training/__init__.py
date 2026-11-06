@@ -1,3 +1,4 @@
+# 统一导出训练、检查、评估和结果汇总接口。
 from .checks import estimate_memory, run_checks
 from .evaluate import collect_logits, collect_predictions
 from .experiment import run_all_models, run_final_test, run_single_model

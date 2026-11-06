@@ -19,6 +19,7 @@ def ensure_directory(path: Path) -> Path:
 
 
 def write_json(path: Path, payload: dict[str, Any]) -> None:
+    # 完整写入同目录的中间文件后替换目标文件，防止中断留下部分内容。
     ensure_directory(path.parent)
     temporary = path.with_name(f".{path.name}.partial")
     with temporary.open("w", encoding="utf-8") as handle:
@@ -28,6 +29,7 @@ def write_json(path: Path, payload: dict[str, Any]) -> None:
 
 
 def save_checkpoint(payload: Any, path: Path) -> None:
+    # 权重和恢复状态均采用同目录文件替换，完成保存后再更新目标文件。
     ensure_directory(path.parent)
     temporary = path.with_name(f".{path.name}.partial")
     torch.save(payload, temporary)
@@ -56,6 +58,7 @@ def format_seconds(seconds: float) -> str:
 
 
 def seed_everything(seed: int) -> None:
+    # 同步初始化 Python、NumPy、CPU 和 CUDA 的随机数状态。
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -63,6 +66,7 @@ def seed_everything(seed: int) -> None:
 
 
 def resolve_device(config: Config) -> torch.device:
+    # 正式实验要求 NVIDIA CUDA，设备不符合要求时立即终止。
     if config.runtime.device != "cuda":
         raise ValueError(f"正式实验要求 CUDA，配置为 {config.runtime.device}")
     if not torch.cuda.is_available():
@@ -76,6 +80,7 @@ def resolve_device(config: Config) -> torch.device:
 
 
 def environment_record(device: torch.device) -> dict[str, Any]:
+    # 记录运行环境与设备信息，供检查、恢复训练和实验结果追溯使用。
     if device.type == "cpu":
         return {
             "python": platform.python_version(), "torch": torch.__version__,
@@ -108,6 +113,7 @@ def environment_record(device: torch.device) -> dict[str, Any]:
 
 
 def rng_states() -> dict[str, Any]:
+    # 保存训练实际使用的全部随机数状态，恢复后继续生成相同序列。
     return {
         "python": random.getstate(),
         "numpy": np.random.get_state(),
@@ -117,12 +123,14 @@ def rng_states() -> dict[str, Any]:
 
 
 def restore_rng_states(states: dict[str, Any]) -> None:
+    # 与 rng_states 成对使用，需在恢复训练和数据迭代之前调用。
     random.setstate(states["python"])
     np.random.set_state(states["numpy"])
     torch.set_rng_state(states["torch"])
     torch.cuda.set_rng_state_all(states["cuda"])
 
 
+# 使用单调时钟统计代码区间的经过时间，退出后保留最终耗时。
 class Stopwatch:
     def __init__(self) -> None:
         self._start = 0.0

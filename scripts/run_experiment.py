@@ -1,3 +1,4 @@
+# 实验命令入口，按配置执行必要检查或三个模型的正式训练。
 import argparse
 import sys
 from pathlib import Path
@@ -34,6 +35,7 @@ def main(argv: list[str]) -> int:
     config = load_config(arguments.config)
     if arguments.phase == "train" and arguments.resume:
         print("按完成的 Epoch 恢复训练，已完成的模型保持原有结果")
+    # 检查与训练共用正式设备和加工数据，在入口统一验证运行条件。
     device = resolve_device(config)
     processed = load_processed(config)
     reader = BatchReader(processed)

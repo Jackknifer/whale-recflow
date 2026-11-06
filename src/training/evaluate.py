@@ -12,6 +12,7 @@ def collect_logits(
     batch_size: int,
     device: torch.device,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    # 验证选权只需 logit、标签和事件编号，复用完整预测收集过程。
     logits, labels, event_id, _, _, _, _ = collect_predictions(
         model, reader, split, batch_size, device
     )
@@ -25,6 +26,7 @@ def collect_predictions(
     batch_size: int,
     device: torch.device,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    # 保持目标原始顺序并关闭梯度，预测和追溯字段按同一批次顺序连接。
     model.eval()
     logit_parts: list[np.ndarray] = []
     label_parts: list[np.ndarray] = []
@@ -45,6 +47,7 @@ def collect_predictions(
                 )
             if not torch.isfinite(logits).all():
                 raise ValueError("模型输出含有非有限数值")
+            # 模型计算使用配置精度，收集后统一转为 float64 计算概率指标。
             logit_parts.append(logits.detach().to("cpu", torch.float64).numpy())
             label_parts.append(batch.labels.astype(np.float64))
             event_parts.append(batch.event_id.astype(np.int64))
