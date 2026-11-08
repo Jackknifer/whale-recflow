@@ -2,7 +2,9 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from sklearn.metrics import log_loss, roc_auc_score
+from sklearn.metrics import roc_auc_score
+
+from .metrics import binary_logloss, validate_predictions
 
 DURATION_MISSING_GROUP = "missing"
 # all_positive 表示视频时长大于零的全部样本。
@@ -19,16 +21,12 @@ def sigmoid(values: np.ndarray) -> np.ndarray:
     return result
 
 
-def _safe_logloss(labels: np.ndarray, probabilities: np.ndarray) -> float:
-    return float(log_loss(labels, probabilities, labels=[0.0, 1.0], normalize=True))
-
-
 def _ne(logloss: float, positive_rate: float) -> float | None:
     if positive_rate <= 0.0 or positive_rate >= 1.0:
         return None
     entropy = -(
         positive_rate * np.log(positive_rate)
-        + (1.0 - positive_rate) * np.log(1.0 - positive_rate)
+        + (1.0 - positive_rate) * np.log1p(-positive_rate)
     )
     if entropy <= 0.0:
         return None
@@ -39,6 +37,7 @@ def group_metrics(
     labels: np.ndarray, logits: np.ndarray, name: str, lower, upper
 ) -> dict[str, Any]:
     # 分组可能为空或只含一个类别，保留可定义的指标并记录原因。
+    validate_predictions(logits, labels)
     count = int(labels.size)
     positive = int(labels.sum())
     positive_rate = float(labels.mean()) if count else None
@@ -57,12 +56,11 @@ def group_metrics(
     if count == 0:
         entry["notes"].append("空分组，指标为空")
         return entry
-    probabilities = sigmoid(logits.astype(np.float64))
-    entry["logloss"] = _safe_logloss(labels.astype(np.float64), probabilities)
+    entry["logloss"] = binary_logloss(logits, labels)
     if positive == 0 or positive == count:
         entry["notes"].append("单一类别，AUC 与 NE 为空")
         return entry
-    entry["auc"] = float(roc_auc_score(labels.astype(np.float64), probabilities))
+    entry["auc"] = float(roc_auc_score(labels.astype(np.float64), logits.astype(np.float64)))
     entry["ne"] = _ne(entry["logloss"], positive_rate)
     return entry
 
@@ -74,6 +72,9 @@ def duration_groups(
     duration_ms: np.ndarray,
 ) -> list[dict[str, Any]]:
     # 原始时长以毫秒保存，分组阈值以秒配置，区间采用 (lower, upper]。
+    validate_predictions(logits, labels)
+    if duration_ms.shape != labels.shape or not np.isfinite(duration_ms).all():
+        raise ValueError("视频时长的形状或数值无效")
     seconds = duration_ms.astype(np.float64) / 1000.0
     missing = duration_ms <= 0
     groups: list[dict[str, Any]] = []
@@ -114,6 +115,7 @@ def relative_improvement(baseline: float | None, current: float | None) -> float
 
 def id_groups(labels: np.ndarray, logits: np.ndarray, video_unknown: np.ndarray, author_unknown: np.ndarray) -> list[dict[str, Any]]:
     # 根据训练词表产生的自然 UNK 分组，测试阶段不会额外遮盖 ID。
+    validate_predictions(logits, labels)
     groups = []
     for field, unknown in (("video", video_unknown), ("author", author_unknown)):
         if unknown.dtype != np.bool_ or unknown.shape != labels.shape:

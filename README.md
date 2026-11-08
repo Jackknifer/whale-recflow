@@ -1,15 +1,20 @@
 # WHALE-RecFlow
 
-基于 PyTorch，在 RecFlow 上复现 [WHALE: A Scalable Unified Model for Recommendation with Wukong-HSTU Architecture](https://arxiv.org/abs/2607.17017v2) 的逐层 Wukong、HSTU 和 Attention Fusion 结构，同时比较 Wukong-only 和 HSTU-only。
+使用 PyTorch 复现论文 [WHALE: A Scalable Unified Model for Recommendation with Wukong-HSTU Architecture](https://arxiv.org/abs/2607.17017v2) 中的 WHALE 模型。
+模型逐层结合 Wukong、HSTU 和 Attention Fusion，并比较 Wukong-only 和 HSTU-only。
 
-## 数据与训练
+## 数据集
 
 使用 [RecFlow](https://github.com/RecFlow-ICLR/RecFlow) 的 `realshow` 数据，日期为 2024-01-13 至 2024-02-18。
-预测发布的 `long_view` 标签，历史采用作者提供的最多 50 条有效观看，保留请求时间严格早于目标的记录。
+预测 `long_view` 标签。
+训练、验证和测试样本分别为 3,000,000、100,000 和 200,000 条，按时间划分。
+
+数据下载：[作者提供的下载入口](https://rec.ustc.edu.cn/share/f8e5adc0-2e57-11ef-bea5-3b4cac9d110e)。
+
+## 训练配置
 
 | 设置 | 取值 |
 | --- | --- |
-| 训练／验证／测试样本 | 3,000,000／100,000／200,000 |
 | Embedding／模型层数 | 64 维／2 层 |
 | Batch Size／训练轮数／种子 | 256／1／42 |
 | 优化器／学习率／weight decay | AdamW／0.001／0.00001 |
@@ -21,7 +26,7 @@
 
 ## 结果
 
-单轮实验在 RTX 4090 上完成，三模型使用相同测试成员。
+实验设备：NVIDIA GeForce RTX 4090。
 
 | 模型 | AUC ↑ | LogLoss ↓ | NE ↓ |
 | --- | ---: | ---: | ---: |
@@ -29,13 +34,16 @@
 | HSTU | 0.733265 | 0.474901 | 0.887451 |
 | WHALE | 0.729998 | 0.478255 | 0.893718 |
 
-单轮及最多三轮的验证选权结果保存在 [results/comparison.csv](results/comparison.csv)，实验信息见 [results/experiment.json](results/experiment.json)。
-结果来自单个种子的公开数据离线实验，论文的工业规模结论需要相应实验条件。
+## 开源说明
 
-源码采用 [Apache-2.0](LICENSE)，Copyright 2026 Jackknifer。
+- 源码：[Apache-2.0](LICENSE)，Copyright 2026 Jackknifer。
+- HSTU：参考 [Meta generative-recommenders](https://github.com/meta-recsys/generative-recommenders)（Apache-2.0），已适配 RecFlow。
+  Copyright (c) Meta Platforms, Inc. and affiliates.
+- RecFlow 数据（Qi Liu 等）及实验汇总：[CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/legalcode.en)。
 
-HSTU 参考 [Meta generative-recommenders](https://github.com/meta-recsys/generative-recommenders)（Apache-2.0）。
-原始版权声明：Copyright (c) Meta Platforms, Inc. and affiliates.
-本项目调整了 RecFlow 输入、时间计算和历史过滤。
+## 参考文献
 
-RecFlow 由 Qi Liu 等作者发布，数据及本项目实验汇总采用 [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/legalcode.en)。
+1. Renqin Cai et al. [WHALE: A Scalable Unified Model for Recommendation with Wukong-HSTU Architecture](https://arxiv.org/abs/2607.17017v2). arXiv, 2026.
+2. Buyun Zhang et al. [Wukong: Towards a Scaling Law for Large-Scale Recommendation](https://proceedings.mlr.press/v235/zhang24ao.html). ICML, 2024.
+3. Jiaqi Zhai et al. [Actions Speak Louder than Words: Trillion-Parameter Sequential Transducers for Generative Recommendations](https://proceedings.mlr.press/v235/zhai24a.html). ICML, 2024.
+4. Qi Liu et al. [RecFlow: An Industrial Full Flow Recommendation Dataset](https://arxiv.org/abs/2410.20868). arXiv, 2024.

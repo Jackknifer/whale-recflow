@@ -202,6 +202,8 @@ class BatchReader:
         return self._data.history_counts[split][requests]
 
     def num_batches(self, split: str, batch_size: int) -> int:
+        if batch_size <= 0:
+            raise ValueError("Batch Size 需要大于零")
         total = int(self.target_rows(split).size)
         return (total + batch_size - 1) // batch_size
 
@@ -215,6 +217,8 @@ class BatchReader:
         epoch: int = 0,
     ) -> Iterator[Batch]:
         # 所有集合共用批次构造，训练时额外应用样本顺序和 ID 遮盖规则。
+        if batch_size <= 0:
+            raise ValueError("Batch Size 需要大于零")
         rows = self.target_rows(split)
         total = int(rows.size)
         if total == 0:
@@ -278,8 +282,16 @@ class BatchReader:
 
     def build_batch(self, rows: np.ndarray, history_slot: np.ndarray) -> Batch:
         exposure = self._exposure
-        rows = np.asarray(rows, dtype=np.int64)
-        history_slot = np.asarray(history_slot, dtype=np.int64)
+        rows = np.asarray(rows)
+        history_slot = np.asarray(history_slot)
+        if rows.ndim != 1 or not rows.size or not np.issubdtype(rows.dtype, np.integer):
+            raise ValueError("目标行索引需要非空的一维整数数组")
+        if np.any((rows < 0) | (rows >= exposure.size)):
+            raise ValueError("目标行索引超出曝光范围")
+        if not np.issubdtype(history_slot.dtype, np.signedinteger):
+            raise TypeError("历史行索引需要有符号整数类型")
+        if np.any((history_slot < -1) | (history_slot >= exposure.size)):
+            raise ValueError("历史行索引超出曝光范围或 PAD 取值无效")
         if history_slot.ndim != 2 or history_slot.shape[1] != self._max_length:
             raise ValueError(
                 f"历史行索引形状为 {history_slot.shape}，"

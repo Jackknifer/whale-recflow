@@ -11,6 +11,7 @@ from ..utils import (
     current_timestamp,
     ensure_directory,
     environment_record,
+    implementation_record,
     read_json,
     save_checkpoint,
     seed_everything,
@@ -451,6 +452,7 @@ def run_checks(
         "created_at": current_timestamp(),
         "environment": environment_record(device),
         "config": config.snapshot(),
+        "implementation": implementation_record(),
         "data_context": reader.data_context,
         "models": {},
     }
@@ -492,6 +494,8 @@ def verify_checks(config: Config, reader: BatchReader, device: torch.device) -> 
         raise ValueError("当前数据与配置尚未完成必要运行检查")
     if results["config"] != config.snapshot() or results["data_context"] != reader.data_context:
         raise ValueError("必要检查的数据或配置与当前正式运行不一致")
+    if results.get("implementation") != implementation_record():
+        raise ValueError("源码与必要检查记录不一致，需要使用当前源码重新执行 check")
     current_environment = environment_record(device)
     for field in ("device", "device_memory_bytes", "torch", "torch_cuda", "cpu_count"):
         if results["environment"][field] != current_environment[field]:

@@ -13,6 +13,7 @@ from ..utils import (
     current_timestamp,
     ensure_directory,
     format_seconds,
+    implementation_record,
     restore_rng_states,
     rng_states,
     save_checkpoint,
@@ -25,7 +26,7 @@ from .metrics import Metrics, compute_metrics
 BEST_MODEL_NAME = "best_model.pt"
 RESUME_NAME = "resume.pt"
 LOG_NAME = "train.log"
-STATE_SCHEMA_VERSION = 2
+STATE_SCHEMA_VERSION = 3
 
 
 def best_epoch_path(directory: Path, epoch: int) -> Path:
@@ -233,6 +234,8 @@ def run_training(
         state = torch.load(resume_path, map_location="cpu", weights_only=False)
         # 先核验配置和目标成员，再恢复模型、优化器及全部随机数状态。
         verify_resume_state(config, state, reader, model_name)
+        if not best_epoch_path(run_directory, int(state["best_epoch"])).is_file():
+            raise FileNotFoundError("恢复训练所需的最佳轮次权重缺失")
         model.load_state_dict(state["model"])
         optimizer.load_state_dict(state["optimizer"])
         restore_rng_states(state["rng"])
@@ -391,6 +394,7 @@ def save_resume_state(
         "train_seconds_total": train_seconds_total,
         "validation_seconds_total": validation_seconds_total,
         "config": config.snapshot(),
+        "implementation": implementation_record(),
         "data_context": reader.data_context,
         "peak_memory_bytes": max(previous_peak_memory_bytes, int(torch.cuda.max_memory_allocated(device)) if device.type == "cuda" else 0),
         "target_counts": {
@@ -419,6 +423,21 @@ def verify_resume_state(
     # 任一实验设置或目标成员发生变化，都需使用独立的运行目录。
     if int(state.get("schema_version", -1)) != STATE_SCHEMA_VERSION:
         raise ValueError("恢复文件的版本与当前实现不一致")
+    if state.get("implementation") != implementation_record():
+        raise ValueError("恢复文件的源码摘要与当前源码不一致")
+    next_epoch = state["next_epoch"]
+    if type(next_epoch) is not int or not 1 <= next_epoch <= config.training.max_epochs:
+        raise ValueError("恢复文件的下一轮次超出配置范围")
+    history = state["history"]
+    if state["epoch"] != next_epoch - 1 or [item["epoch"] for item in history] != list(range(next_epoch)):
+        raise ValueError("恢复文件的轮次与训练记录不一致")
+    if not all(np.isfinite(item["validation"]["logloss"]) for item in history):
+        raise ValueError("恢复文件的验证损失含有非有限数值")
+    best = min(history, key=lambda item: item["validation"]["logloss"])
+    if state["best_epoch"] != best["epoch"] or state["best_validation"] != best["validation"]:
+        raise ValueError("恢复文件的最佳轮次与验证记录不一致")
+    if state["best_logloss"] != best["validation"]["logloss"] or state["stale_epochs"] != history[-1]["stale_epochs"]:
+        raise ValueError("恢复文件的权重选择或早停状态与训练记录不一致")
     if state["config"] != config.snapshot():
         raise ValueError("恢复文件的有效配置与当前配置不一致")
     if state["data_context"] != reader.data_context:

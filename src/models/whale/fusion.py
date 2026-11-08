@@ -46,8 +46,9 @@ class FusionBlock(nn.Module):
             return output
         selected_sequence = sequence[present]
         query = self._query(self._query_norm(nonsequence[present]))
-        key = self._key(self._sequence_norm(selected_sequence))
-        value = self.project_value(selected_sequence)
+        normalized_sequence = self._sequence_norm(selected_sequence)
+        key = self._key(normalized_sequence)
+        value = self._value(normalized_sequence)
         # 得分形状为 [B_active, N, L]，每个非序列 Token 独立聚合历史。
         scores = query @ key.transpose(1, 2) / self._dim**0.5
         mask = history_mask[present].unsqueeze(1)

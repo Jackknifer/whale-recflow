@@ -28,6 +28,7 @@ METADATA_FILE = "metadata.json"
 TARGET_DIRECTORY = "targets"
 HISTORY_DIRECTORY = "history"
 SPLIT_NAMES = ("train", "validation", "test")
+VALIDATION_CHUNK = 262144
 
 EXPOSURE_COLUMNS = (
     "event_id",
@@ -84,6 +85,13 @@ def _exposure_from_frame(frame: pd.DataFrame) -> ExposureTable:
     missing = [name for name in EXPOSURE_COLUMNS if name not in frame.columns]
     if missing:
         raise ValueError(f"曝光文件缺少字段 {missing}")
+    expected_types = {
+        **{name: np.int32 for name in EXPOSURE_INT32},
+        **{name: np.int64 for name in EXPOSURE_INT64},
+        **{name: np.int8 for name in EXPOSURE_INT8},
+        "event_id": np.int64, "file_index": np.int16, "record_index": np.int32,
+    }
+    _validate_frame(frame, expected_types, "曝光")
     values: dict[str, np.ndarray] = {}
     for name in EXPOSURE_INT32:
         values[name] = frame[name].to_numpy(dtype=np.int32)
@@ -119,12 +127,31 @@ def _request_index_from_frame(frame: pd.DataFrame) -> RequestIndex:
     missing = [name for name in REQUEST_COLUMNS if name not in frame.columns]
     if missing:
         raise ValueError(f"请求文件缺少字段 {missing}")
+    _validate_frame(frame, {
+        "request_id": np.int64, "user_id": np.int32,
+        "request_timestamp": np.int64, "event_counts": np.int32,
+    }, "请求")
+    requests = frame["request_id"].to_numpy()
+    if np.any(requests[1:] <= requests[:-1]):
+        raise ValueError("请求索引需要唯一且升序的 request_id")
+    if np.any(frame["event_counts"].to_numpy() <= 0):
+        raise ValueError("请求曝光数量需要大于零")
     return RequestIndex(
         request_ids=frame["request_id"].to_numpy(dtype=np.int64),
         user_id=frame["user_id"].to_numpy(dtype=np.int32),
         request_timestamp=frame["request_timestamp"].to_numpy(dtype=np.int64),
         event_counts=frame["event_counts"].to_numpy(dtype=np.int32),
     )
+
+
+def _validate_frame(frame: pd.DataFrame, expected: dict[str, Any], name: str) -> None:
+    if frame.empty or not frame.columns.is_unique:
+        raise ValueError(f"{name}文件需要有效记录及唯一字段")
+    for field, dtype in expected.items():
+        if frame[field].dtype != np.dtype(dtype):
+            raise TypeError(f"{name}字段 {field} 需要 {np.dtype(dtype)} 类型")
+        if np.any(frame[field].to_numpy() < 0):
+            raise ValueError(f"{name}字段 {field} 出现负值")
 
 
 def _exposure_frame(exposure: ExposureTable) -> pd.DataFrame:
@@ -280,6 +307,10 @@ def load_processed(config: Config) -> ProcessedData:
         feedback_offset=int(rules["feedback_offset"]),
     )
     numerical = NumericalParameters.from_json(payload["numerical"])
+    if numerical.to_json() != metadata["numerical"]:
+        raise ValueError("数值参数与元数据不一致")
+    if vocabulary.sizes != metadata["vocabulary_sizes"] or vocabulary.feedback_sizes != metadata["feedback_sizes"]:
+        raise ValueError("词表大小与元数据不一致")
     # 目标和历史数组以只读内存映射加载，批次构造时再读取所需部分。
     target_rows = {
         split: np.load(root / TARGET_DIRECTORY / f"{split}.npy", mmap_mode="r")
@@ -303,6 +334,12 @@ def load_processed(config: Config) -> ProcessedData:
     }
     if exposure.size != metadata["event_count"] or request_index.size != metadata["request_count"]:
         raise ValueError("加工数据的曝光或请求数量与元数据不一致")
+    for name in EXPOSURE_INT8:
+        if np.any(getattr(exposure, name) > 1):
+            raise ValueError(f"曝光字段 {name} 需要二值标签")
+    if np.any(exposure.event_id[1:] <= exposure.event_id[:-1]):
+        raise ValueError("曝光事件编号需要唯一且升序")
+    windows = config.data.time_bounds_ms()
     for split in SPLIT_NAMES:
         rows = target_rows[split]
         requests = history_requests[split]
@@ -311,6 +348,17 @@ def load_processed(config: Config) -> ProcessedData:
             raise ValueError(f"数据集合 {split} 的目标索引类型或数量不符合配置")
         if np.any(rows < 0) or np.any(rows >= exposure.size):
             raise ValueError(f"数据集合 {split} 的目标索引超出曝光范围")
+        if np.any(rows[1:] <= rows[:-1]):
+            raise ValueError(f"数据集合 {split} 的目标索引需要唯一且升序")
+        target_times = exposure.request_timestamp[rows]
+        start, end = windows[split]
+        if np.any((target_times < start) | (target_times >= end)):
+            raise ValueError(f"数据集合 {split} 的目标超出配置时间范围")
+        statistics = metadata["splits"][split]
+        if statistics["target_count"] != rows.size or statistics["positive_count"] != int(exposure.long_view[rows].sum()):
+            raise ValueError(f"数据集合 {split} 的样本数量或标签与元数据不一致")
+        if requests.ndim != 1 or requests.size != statistics["request_count"]:
+            raise ValueError(f"数据集合 {split} 的请求数量或形状无效")
         if history_rows[split].dtype != np.int32 or history_rows[split].shape != (requests.size, config.data.max_history_length):
             raise ValueError(
                 f"数据集合 {split} 的历史行索引形状为 {history_rows[split].shape}，"
@@ -318,7 +366,7 @@ def load_processed(config: Config) -> ProcessedData:
             )
         if history_counts[split].shape != requests.shape:
             raise ValueError(f"数据集合 {split} 的历史长度数量与请求数量不一致")
-        if mapping.shape != rows.shape or np.any(mapping < 0) or np.any(mapping >= requests.size):
+        if mapping.dtype != np.int32 or mapping.shape != rows.shape or np.any(mapping < 0) or np.any(mapping >= requests.size):
             raise ValueError(f"数据集合 {split} 的目标与历史请求映射无效")
         # 保存的历史请求必须与每个目标所属请求逐条一致。
         if not np.array_equal(requests[mapping], exposure.request_id[rows]):
@@ -330,9 +378,20 @@ def load_processed(config: Config) -> ProcessedData:
             exposure, request_index, requests, history_rows[split],
             history_counts[split], audit["splits"][split],
         )
-    event_slot = request_index.positions(exposure.request_id)
-    if np.any(event_slot < 0):
-        raise ValueError("曝光记录的 request_id 未出现在请求索引中")
+    # 分批核验曝光与请求的对应关系，控制检查过程的额外内存。
+    counts = np.zeros(request_index.size, dtype=np.int64)
+    for begin in range(0, exposure.size, VALIDATION_CHUNK):
+        end = min(begin + VALIDATION_CHUNK, exposure.size)
+        event_slot = request_index.positions(exposure.request_id[begin:end])
+        if np.any(event_slot < 0):
+            raise ValueError("曝光记录的 request_id 未出现在请求索引中")
+        if not np.array_equal(exposure.user_id[begin:end], request_index.user_id[event_slot]):
+            raise ValueError("曝光用户与请求索引不一致")
+        if not np.array_equal(exposure.request_timestamp[begin:end], request_index.request_timestamp[event_slot]):
+            raise ValueError("曝光时间与请求索引不一致")
+        np.add.at(counts, event_slot, 1)
+    if not np.array_equal(counts, request_index.event_counts):
+        raise ValueError("各请求的曝光数量与请求索引不一致")
     return ProcessedData(
         exposure=exposure,
         request_index=request_index,

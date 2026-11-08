@@ -25,6 +25,21 @@ class Vocabulary:
     code_offset: int
     feedback_offset: int
 
+    def __post_init__(self) -> None:
+        if (self.padding_index, self.unknown_index, self.code_offset, self.feedback_offset) != (0, 1, 2, 2):
+            raise ValueError("词表的 PAD、UNK 和编码起点无效")
+        if set(self.raw_values) != set(CATEGORICAL_FIELDS) or set(self.sizes) != set(CATEGORICAL_FIELDS):
+            raise ValueError("词表类别字段不完整")
+        for field, values in self.raw_values.items():
+            if values.ndim != 1 or values.dtype != np.int64 or not values.size:
+                raise ValueError(f"词表 {field} 需要非空的一维 int64 数组")
+            if np.any(values < 0) or np.any(values[1:] <= values[:-1]):
+                raise ValueError(f"词表 {field} 需要非负、唯一且升序的原始值")
+            if self.sizes[field] != values.size + self.code_offset:
+                raise ValueError(f"词表 {field} 的大小与编码数量不一致")
+        if any(size != FEEDBACK_TABLE_SIZE for size in self.feedback_sizes.values()):
+            raise ValueError("反馈词表大小需要为 4")
+
     def rules(self) -> dict[str, object]:
         return {
             "sizes": dict(self.sizes),

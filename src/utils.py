@@ -1,4 +1,5 @@
 import json
+import hashlib
 import os
 import platform
 import random
@@ -48,6 +49,16 @@ def read_json(path: Path) -> dict[str, Any]:
 
 def current_timestamp() -> str:
     return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+
+
+def implementation_record() -> dict[str, str]:
+    # 运行记录保存源码摘要，用于核验检查结果和恢复状态对应的计算过程。
+    paths = sorted((PROJECT_ROOT / "src").rglob("*.py"))
+    paths.extend(sorted((PROJECT_ROOT / "scripts").glob("*.py")))
+    return {
+        str(path.relative_to(PROJECT_ROOT)): hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in paths
+    }
 
 
 def format_seconds(seconds: float) -> str:

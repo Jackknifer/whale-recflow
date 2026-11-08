@@ -1,7 +1,8 @@
-from dataclasses import asdict, dataclass, fields
+import math
+from dataclasses import asdict, dataclass, fields, is_dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args, get_origin
 from zoneinfo import ZoneInfo
 
 import yaml
@@ -29,6 +30,54 @@ def _as_tuple(mapping: dict[str, Any], key: str) -> tuple[str, ...]:
     if not isinstance(value, list):
         raise TypeError(f"配置字段 {key} 需要列表")
     return tuple(value)
+
+
+def _validate_type(value: Any, annotation: Any, name: str) -> None:
+    if is_dataclass(annotation):
+        _validate_section(value, annotation, name)
+    elif annotation is float:
+        if type(value) not in (int, float) or not math.isfinite(value):
+            raise ValueError(f"配置字段 {name} 需要有限数值")
+    elif annotation is Path:
+        if not isinstance(value, str) or not value.strip():
+            raise TypeError(f"配置字段 {name} 需要有效路径字符串")
+    elif annotation in (str, int, bool):
+        if type(value) is not annotation:
+            raise TypeError(f"配置字段 {name} 需要 {annotation.__name__}")
+    elif get_origin(annotation) is tuple:
+        if not isinstance(value, list):
+            raise TypeError(f"配置字段 {name} 需要列表")
+        arguments = get_args(annotation)
+        if arguments[-1] is Ellipsis:
+            for index, item in enumerate(value):
+                _validate_type(item, arguments[0], f"{name}[{index}]")
+        else:
+            if len(value) != len(arguments):
+                raise ValueError(f"配置字段 {name} 的长度无效")
+            for index, (item, kind) in enumerate(zip(value, arguments)):
+                _validate_type(item, kind, f"{name}[{index}]")
+    elif get_origin(annotation) is dict:
+        if not isinstance(value, dict):
+            raise TypeError(f"配置字段 {name} 需要映射")
+        key_type, value_type = get_args(annotation)
+        for key, item in value.items():
+            _validate_type(key, key_type, name)
+            _validate_type(item, value_type, f"{name}.{key}")
+    elif get_args(annotation) == (float, type(None)):
+        if value is not None:
+            _validate_type(value, float, name)
+    else:
+        raise TypeError(f"配置字段 {name} 使用了未支持的类型 {annotation}")
+
+
+def _validate_section(section: Any, kind: Any, name: str) -> None:
+    if not isinstance(section, dict):
+        raise TypeError(f"配置部分 {name} 需要映射")
+    expected = {field.name for field in fields(kind)}
+    if set(section) != expected:
+        raise ValueError(f"配置部分 {name} 字段不匹配：{set(section) ^ expected}")
+    for field in fields(kind):
+        _validate_type(section[field.name], field.type, f"{name}.{field.name}")
 
 
 def _snapshot(value: Any) -> Any:
@@ -95,10 +144,13 @@ class DataConfig:
             "validation": (self.validation_start, self.test_start),
             "test": (self.test_start, self.end_exclusive),
         }
-        return {
+        result = {
             split: (parse_time_ms(start, self.timezone), parse_time_ms(end, self.timezone))
             for split, (start, end) in bounds.items()
         }
+        if any(start >= end for start, end in result.values()):
+            raise ValueError("训练、验证和测试的时间边界需要严格递增")
+        return result
 
     def file_dates(self) -> tuple[str, ...]:
         # 原始日文件包含起止日期，数量必须与配置一致。
@@ -285,6 +337,14 @@ def _load_data_config(section: dict[str, Any]) -> DataConfig:
     expected.add("files")
     if set(section) != expected:
         raise ValueError(f"数据配置字段不匹配：{set(section) ^ expected}")
+    if not isinstance(files, dict) or set(files) != {"start_date", "end_date", "extension", "expected_count"}:
+        raise ValueError("原始文件配置字段不匹配")
+    normalized = {key: value for key, value in section.items() if key != "files"}
+    normalized.update(
+        file_start_date=files["start_date"], file_end_date=files["end_date"],
+        file_extension=files["extension"], expected_file_count=files["expected_count"],
+    )
+    _validate_section(normalized, DataConfig, "data")
     return DataConfig(
         name=_expect(section, "name", "RecFlow"),
         raw_root=Path(_field(section, "raw_root")),
@@ -373,6 +433,14 @@ def load_config(path: str | Path = "configs/official.yaml") -> Config:
         raw = yaml.safe_load(handle)
     if not isinstance(raw, dict):
         raise TypeError("配置内容需要映射")
+    expected = {field.name for field in fields(Config)} - {"path"}
+    if set(raw) != expected:
+        raise ValueError(f"配置顶层字段不匹配：{set(raw) ^ expected}")
+    for field in fields(Config):
+        if field.name not in ("path", "data"):
+            _validate_type(raw[field.name], field.type, field.name)
+    if not isinstance(raw["data"], dict):
+        raise TypeError("数据配置需要映射")
     experiment = _field(raw, "experiment")
     training = _field(raw, "training")
     evaluation = _field(raw, "evaluation")
@@ -443,9 +511,9 @@ def load_config(path: str | Path = "configs/official.yaml") -> Config:
     policy = "final_epoch_only" if config.training.max_epochs == 1 else "selected_checkpoint_only"
     if config.evaluation.final_test_policy != policy:
         raise ValueError("最终测试策略与训练轮数不一致")
-    fields = ("user_id", "device_id", "age", "gender", "province", "video_id", "author_id",
-              "category_level_one", "category_level_two", "upload_type")
-    if config.data.categorical_fields != fields or config.data.history_video_fields != fields[5:]:
+    categorical_fields = ("user_id", "device_id", "age", "gender", "province", "video_id", "author_id",
+                          "category_level_one", "category_level_two", "upload_type")
+    if config.data.categorical_fields != categorical_fields or config.data.history_video_fields != categorical_fields[5:]:
         raise ValueError("类别字段或顺序与模型输入不一致")
     if config.data.history_feedback_fields != ("effective_view",):
         raise ValueError("历史反馈需要为 effective_view")
@@ -461,5 +529,54 @@ def load_config(path: str | Path = "configs/official.yaml") -> Config:
         raise ValueError("输入 Token 数量需要为 13，Wukong 输出需要为 8")
     if config.model.hstu.relative_time_buckets != 128 or config.model.hstu.relative_time_log_divisor != 0.301:
         raise ValueError("HSTU 时间分桶参数与批次计算不一致")
-    config.data.file_names()
+    _validate_ranges(config)
     return config
+
+
+def _validate_ranges(config: Config) -> None:
+    positive = {
+        "model.layer_norm_eps": config.model.layer_norm_eps,
+        "model.numerical_hidden_dim": config.model.numerical_hidden_dim,
+        "model.sequence_hidden_dim": config.model.sequence_hidden_dim,
+        "model.wukong.fmb_tokens": config.model.wukong.fmb_tokens,
+        "model.wukong.lcb_tokens": config.model.wukong.lcb_tokens,
+        "model.hstu.num_heads": config.model.hstu.num_heads,
+        "model.hstu.attention_dim_per_head": config.model.hstu.attention_dim_per_head,
+        "model.hstu.value_dim_per_head": config.model.hstu.value_dim_per_head,
+        "model.fusion.swiglu_hidden_dim": config.model.fusion.swiglu_hidden_dim,
+        "training.learning_rate": config.training.learning_rate,
+        "training.gradient_clip_norm": config.training.gradient_clip_norm,
+        "training.early_stopping_patience": config.training.early_stopping_patience,
+        "training.log_every_steps": config.training.log_every_steps,
+    }
+    for name, value in positive.items():
+        if value <= 0:
+            raise ValueError(f"配置字段 {name} 需要大于零")
+    for name, values in (("wukong.mlp_hidden_dims", config.model.wukong.mlp_hidden_dims),
+                         ("head.hidden_dims", config.model.head.hidden_dims)):
+        if any(value <= 0 for value in values):
+            raise ValueError(f"配置字段 {name} 的各层维度需要大于零")
+    if config.training.weight_decay < 0 or config.training.early_stopping_min_delta < 0:
+        raise ValueError("weight_decay 和 early_stopping_min_delta 需要为非负数")
+    if not 0 <= config.model.head.dropout < 1:
+        raise ValueError("head.dropout 需要处于 [0, 1)")
+    if config.model.wukong.fmb_tokens + config.model.wukong.lcb_tokens != config.model.nonsequence_tokens:
+        raise ValueError("FMB 与 LCB 的 Token 总数需要等于 nonsequence_tokens")
+    if config.evaluation.metrics != ("auc", "logloss", "ne"):
+        raise ValueError("评估指标需要为 auc、logloss 和 ne")
+    groups = config.evaluation.duration_groups
+    boundary = 0.0
+    for index, (lower, upper) in enumerate(groups):
+        if lower != boundary or (upper is None and index != len(groups) - 1):
+            raise ValueError("视频时长区间需要从零开始连续覆盖")
+        if upper is not None and upper <= lower:
+            raise ValueError("视频时长区间上限需要大于下限")
+        boundary = upper
+    if not groups or boundary is not None:
+        raise ValueError("最后一个视频时长区间需要包含全部剩余时长")
+    dates = config.data.file_dates()
+    bounds = config.data.time_bounds_ms()
+    first = parse_time_ms(f"{dates[0]}T00:00:00+08:00", config.data.timezone)
+    last = parse_time_ms(f"{dates[-1]}T00:00:00+08:00", config.data.timezone) + 86400000
+    if bounds["train"][0] < first or bounds["test"][1] > last:
+        raise ValueError("训练、验证和测试的时间范围超出来源日期")

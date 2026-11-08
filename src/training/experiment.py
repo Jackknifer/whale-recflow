@@ -11,6 +11,7 @@ from ..utils import (
     current_timestamp,
     ensure_directory,
     environment_record,
+    implementation_record,
     read_json,
     write_json,
 )
@@ -42,6 +43,8 @@ def verify_run_context(config: Config, reader: BatchReader, model_name: str) -> 
         raise ValueError(f"模型 {model_name} 的运行配置与当前配置不一致")
     if context["data_context"] != reader.data_context:
         raise ValueError(f"模型 {model_name} 的数据来源或预处理参数与当前数据不一致")
+    if context.get("implementation") != implementation_record():
+        raise ValueError(f"模型 {model_name} 的源码摘要与当前源码不一致")
     reader.verify_target_indices(directory / TARGET_INDICES_FILE)
     return context
 
@@ -179,6 +182,7 @@ def run_single_model(
                 "config": config.snapshot(),
                 "data_context": reader.data_context,
                 "environment": environment_record(device),
+                "implementation": implementation_record(),
                 "started_at": started_at,
             },
         )

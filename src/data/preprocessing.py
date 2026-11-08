@@ -30,6 +30,19 @@ class NumericalParameters:
     means: dict[str, float]
     stds: dict[str, float]
 
+    def __post_init__(self) -> None:
+        features = set(NUMERICAL_FEATURE_ORDER)
+        fill_features = {name for name in features if not name.endswith("_missing")}
+        for name, values, expected in (
+            ("fill_values", self.fill_values, fill_features),
+            ("means", self.means, features),
+            ("stds", self.stds, features),
+        ):
+            if set(values) != expected or not all(np.isfinite(value) for value in values.values()):
+                raise ValueError(f"数值参数 {name} 的字段或数值无效")
+        if any(value < 0 for value in self.stds.values()):
+            raise ValueError("数值参数的标准差需要为非负数")
+
     def to_json(self) -> dict[str, object]:
         return {
             "fill_values": dict(self.fill_values),
@@ -41,6 +54,10 @@ class NumericalParameters:
 
     @classmethod
     def from_json(cls, payload: dict[str, object]) -> "NumericalParameters":
+        if payload["feature_order"] != list(NUMERICAL_FEATURE_ORDER):
+            raise ValueError("数值参数的特征顺序不一致")
+        if payload["standardized_features"] != list(STANDARDIZED_FEATURES):
+            raise ValueError("数值参数的标准化字段不一致")
         return cls(
             fill_values={
                 key: float(value) for key, value in payload["fill_values"].items()
